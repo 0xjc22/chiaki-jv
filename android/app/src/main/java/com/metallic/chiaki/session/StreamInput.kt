@@ -173,10 +173,17 @@ class StreamInput(val context: Context, val preferences: Preferences)
 		return true
 	}
 
+	private val controllerInputTiming = ControllerInputTiming()
+
 	fun onGenericMotionEvent(event: MotionEvent): Boolean
 	{
 		if(event.source and InputDevice.SOURCE_CLASS_JOYSTICK != InputDevice.SOURCE_CLASS_JOYSTICK)
 			return false
+		val nowMs = android.os.SystemClock.uptimeMillis()
+		val oldestMs = if(event.historySize > 0) event.getHistoricalEventTime(0) else event.eventTime
+		controllerInputTiming.record(nowMs, event.eventTime, oldestMs, event.historySize)?.let {
+			android.util.Log.i("Chiaki", "Controller Android dispatch: latestAvgMs=${it.latestAvgMs}, oldestAvgMs=${it.oldestAvgMs}, oldestMaxMs=${it.oldestMaxMs}, events=${it.events}, batchedEvents=${it.batchedEvents}, samples=${it.samples}")
+		}
 		fun Float.signedAxis() = (this * Short.MAX_VALUE).toInt().toShort()
 		fun Float.unsignedAxis() = (this * UByte.MAX_VALUE.toFloat()).toUInt().toUByte()
 		motionControllerState.leftX = event.getAxisValue(MotionEvent.AXIS_X).signedAxis()

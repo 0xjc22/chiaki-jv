@@ -132,6 +132,15 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 		}
 	}
 
+	override fun onAttachedToWindow()
+	{
+		super.onAttachedToWindow()
+		// Joystick axes control a remote game, not a locally rendered scrolling view.
+		// Do not hold them until the next UI vsync; leave touchscreen batching alone.
+		window.decorView.requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_JOYSTICK)
+		android.util.Log.i("Chiaki", "Unbuffered joystick dispatch enabled")
+	}
+
 	override fun onResume()
 	{
 		super.onResume()
