@@ -1,10 +1,19 @@
-# chiaki-jv — Version 1 (v1.1.0)
+# chiaki-jv — Version 1 (v1.1.1)
 
 Fork of [gameblabla/chiaki-up](https://github.com/gameblabla/chiaki-up) at upstream commit 86e38bf, hardened for HEVC streaming and cellular remote play. Developed and verified on a Samsung Z Fold 8 streaming from a PS5 over LAN and over a WireGuard cellular VPN (FreshTomato 2026.3 router).
 
 Repository: https://github.com/0xjc22/chiaki-jv
 Release branch: chiaki-jv (default)
-Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (current release)
+Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (SELECT remap), v1.1.1 (current release)
+
+## v1.1.1 changes
+
+- Release native-window references during decoder teardown and surface removal.
+- Dispatch key-only L2/R2 press and release immediately; SELECT remains mapped to the touchpad button.
+- Handle MediaCodec output-format/buffer notifications without false error logs.
+- Retry pending IDR recovery after two seconds of continued frame rejection; rate-limit all attempts, including failed sends, to 500 ms. Decoder callback rejection now uses the same recovery policy. Callback acceptance still closes the episode as an approximation, not confirmation that an IDR was decoded or displayed.
+- Verify APKs in place without overwriting prior artifacts, with explicit identity, signing, architecture, ELF range and alignment checks.
+- Strengthen host regressions and correct the MTU/backlog documentation. See [REVIEW-FOLLOWUP.md](REVIEW-FOLLOWUP.md) for the review findings and remaining limits.
 
 ## v1.1.0 changes
 
@@ -12,12 +21,12 @@ Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (current release)
 
 ## Artifacts
 
-v1.1.0 debug APK (experimental package, installs next to the upstream app):
-- Path: /home/jc/dl/chiaki-up-hevc-v1.1.0-arm64.apk
-- SHA256: c6548f22333a52860c9f51e57ed720c364220c31dd301a978bcf44dc9c8bb11a
+v1.1.1 debug APK (separate package, installs next to the upstream app and updates earlier HEVC builds):
+- Path: /home/jc/dl/chiaki-up-hevc-v1.1.1-arm64.apk
+- SHA256: 5810825b9a84f2ebefe6cfbf5e85503e3427acd0eb76e4cd65f7947b22fae6b1
 - Package: com.gameblabla.chiaki.hevcfix
-- versionCode 32, versionName 1.1.0-hevcfix
-- Label: Chiaki-Up HEVC 1.1.0
+- versionCode 33, versionName 1.1.1-hevcfix
+- Label: Chiaki-Up HEVC 1.1.1
 - arm64-v8a, minSdk 30, debug-signed, v2 signature, ZIP/ELF 16 KiB aligned
 
 ## What is fixed or added
@@ -26,7 +35,7 @@ Video pipeline
 - Complete access units are queued to MediaCodec instead of arbitrary fragments, with real input-capacity validation and honest queue-failure reporting. Oversized access units are rejected rather than fed as corrupt prefixes.
 - HEVC requests Android's explicit low-latency mode. Any configure rejection (low-latency key, max-input-size hint, or anything else) recreates the codec and retries with a minimal mime/width/height format, so an optional hint can never make the session fatal.
 - Input dequeue retries up to three attempts so a transient buffer shortage does not cost a whole access unit (usually the keyframe recovery depends on).
-- Incomplete or FEC-failed frames are dropped before decoding instead of poisoning decoder reference pictures. Each FEC failure requests an IDR from the console: one request per recovery episode, at most one successful request per 500 ms, and the episode closes when a frame is delivered — so a persistently lossy link cannot cause a keyframe storm.
+- Incomplete or FEC-failed frames are dropped before decoding instead of poisoning decoder reference pictures. Recovery requests are rate-limited to one attempt per 500 ms. A pending successful request suppresses further requests for two seconds while rejection continues; callback acceptance clears the episode without proving keyframe decoding.
 - Frames arriving while no decoder exists are discarded silently-by-design instead of being reported corrupt, so a surface detach does not spam the console with per-frame corrupt reports.
 - The stream MTU advertised to the PS5 is capped at 1280. With IPv4, 1280 bytes plus 28 bytes of UDP/IP headers fits the tested router's 1420-byte WireGuard interface MTU; that interface MTU already measures inner packets, so WireGuard encapsulation must not be subtracted again. This reduces fragmentation on the tested path, not every possible tunnel or smaller path MTU. Before this change the investigation observed fragmented video traffic and widespread cellular HEVC frame damage.
 - Android encrypted-stream receive buffer requests 4 MiB (the test phone accepted 8 MiB; Linux doubles the request for sk_rcvbuf accounting). A kernel clamp below the request now logs a warning instead of silently under-provisioning, a failed setsockopt falls back to the default buffer instead of aborting the connect, and the log line identifies which socket it describes.
@@ -63,7 +72,7 @@ Android build and packaging
 
 ## Tests
 
-Host-runnable suites (all pass at v1.0.1; extraction-based harnesses compile the real source blocks against API fakes):
+Host regression scripts (16/16 pass at v1.1.1; extracted source blocks run against API fakes, not Android hardware):
 - android-video-input-test.py (8/8 submission scenarios)
 - android-video-format-test.py (format sizing + low-latency keys)
 - android-video-low-latency-test.py (configure fallback semantics)
@@ -79,22 +88,13 @@ Host-runnable suites (all pass at v1.0.1; extraction-based harnesses compile the
 - android-controller-timing-test.py (timing accounting incl. idle reset)
 - android-controller-unbuffered-test.py (attach/refocus re-request)
 - android-controller-select-touchpad-test.py (added in v1.1.0; SELECT down/up and composed buttons)
+- apk-artifact-verifier-test.py (8 isolated verifier cases, including malformed ELF rejection)
 - android-phone-stream-smoke.py (device-only; skips without adb)
 - verify-apk-artifact.py (APK signature/alignment/native tokens)
 
 Native suite: build-host ctest 1/1 (94/94 unit tests).
 
-## Unreleased follow-up review
-
-The published v1.1.0 artifact and identity above remain unchanged. The follow-up changes on `chiaki-jv` are not a new tagged release:
-- Release native-window references during decoder teardown and surface removal; correct the detach-before-delete comment.
-- Dispatch key-only L2/R2 transitions immediately, rather than waiting for another input event. SELECT remains mapped to the touchpad button.
-- Treat MediaCodec output-format/buffer notifications as informational; retain backoff for no-output and real errors.
-- Bound IDR recovery: retry on continued rejection after two seconds, rate-limit failed attempts to 500 ms, and include decoder callback rejection. Callback acceptance still closes the episode as an approximation, not confirmation of an IDR or displayed frame.
-- Verify APKs in place without overwriting release artifacts, with explicit identity/signature/ELF checks.
-- Strengthen regression coverage for window ownership/order, output notifications, failed socket-buffer setup, codec recreation, trigger delivery, and recovery retries.
-
-CTest covers the native unit suite only; the Python regression scripts are a separate gate. Offline build success does not establish bit-for-bit reproducibility or Android runtime/playback acceptance. See REVIEW-FOLLOWUP.md for the verification results and remaining limits.
+The v1.1.1 offline Android build and APK signature/identity/alignment checks pass. CTest covers the native unit suite only; the Python regression scripts are a separate gate. No phone was connected for this release pass, so live playback acceptance is still unperformed. Build success does not establish bit-for-bit reproducibility.
 
 Build prerequisites: JDK17, SDK35/build-tools 35.0.0, CMake 3.22.1, NDK 29.0.14206865, plus a Python protobuf-3.20.3 toolchain for the old nanopb generator (see HEVC-INVESTIGATION.md and the test scripts).
 

@@ -3,7 +3,7 @@
 Reviewed release HEAD: `31662accbdc0f8424ade5d615b341fcffb78be4a` (`v1.1.0`).
 Primary revision range: `v1.0.0` (`d8b2ca0`) → `v1.0.1` (`3d10d62`) → `v1.1.0` (`31662ac`), with original fork changes traced to upstream `86e38bf`.
 
-Eight read-only GPT-6 Luna reviewers covered decoder lifecycle, MediaCodec submission/output, receiver/IDR protocol, networking, controller input, regression harnesses, Android packaging, and cross-component code quality. The parent rechecked findings, reproduced actionable defects, and made local changes. One Luna worker implemented the isolated verifier fix; a tenth fresh Luna reviewer checked the complete follow-up diff. The follow-up source and tests are committed on `chiaki-jv` after v1.1.0. This update does not create a new tag or APK release; installation and live playback acceptance remain unperformed.
+Eight read-only GPT-6 Luna reviewers covered decoder lifecycle, MediaCodec submission/output, receiver/IDR protocol, networking, controller input, regression harnesses, Android packaging, and cross-component code quality. The parent rechecked findings, reproduced actionable defects, and made local changes. One Luna worker implemented the isolated verifier fix; a tenth fresh Luna reviewer checked the complete follow-up diff. The follow-up source and tests were committed on `chiaki-jv` after v1.1.0, then versioned as v1.1.1. Installation and live playback acceptance remain unperformed.
 
 ## Verdict on the existing revisions
 
@@ -50,9 +50,9 @@ Follow-up execution:
 - `git diff --check` passes for source/tests/docs. Generated .patch context lines are excluded from whitespace lint; those files are validated by application instead.
 - Decoder patch applies to upstream `86e38bf` and reconstructs current C/header files exactly.
 
-Candidate APK (unreleased; still uses v1.1.0 debug identity, not a version bump):
-`/home/jc/chiaki-up-hevc-fix/android/app/build/outputs/apk/debug/app-debug.apk`
-SHA256: `0621bce484ee2dccbedd4739844966c4d95183d85ae4bac41a88bfede3bffdc8`
+Release APK (rebuilt with versionCode 33, versionName 1.1.1-hevcfix):
+`/home/jc/dl/chiaki-up-hevc-v1.1.1-arm64.apk`
+SHA256: `5810825b9a84f2ebefe6cfbf5e85503e3427acd0eb76e4cd65f7947b22fae6b1`
 
 Published artifact remains untouched:
 `/home/jc/dl/chiaki-up-hevc-v1.1.0-arm64.apk`
@@ -68,7 +68,7 @@ Execution logs/manifest: `/home/jc/.hermes/cache/scratch/chiaki-jv-review/final-
 - Concurrent arbitrary surface setters are outside the traced main-thread lifecycle contract. No unsupported concurrency framework was added.
 - Existing OpenSSL API, Android lifecycle annotation, and Gradle deprecation warnings remain. They are inherited modernization work, not failures introduced by these fixes.
 - CTest runs the native unit suite only; Python scripts are a separate explicit gate. Full Gradle transitive dependency locking/checksum metadata and bit-for-bit reproducible binaries are not established.
-- These follow-up changes are source updates, not a new APK release. A release must get a new versionCode/versionName and fresh artifact metadata; never replace or retag v1.1.0.
+- v1.1.1 contains these follow-up changes and uses a new versionCode/versionName. The earlier v1.1.0 tag and published APK remain unchanged.
 
 ## Final independent review
 
