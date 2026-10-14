@@ -25,7 +25,7 @@ android {
         applicationId "com.gameblabla.chiaki"
         minSdkVersion 30
         targetSdkVersion 35
-        versionCode 17
+        versionCode 30
         versionName chiakiVersion
         externalNativeBuild {
             cmake {
@@ -44,6 +44,7 @@ android {
     }
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -64,6 +65,13 @@ android {
 	}
 
     buildTypes {
+        debug {
+            applicationIdSuffix ".hevcfix"
+            versionNameSuffix "-hevc-mtu-v7"
+            ndk {
+                abiFilters "arm64-v8a"
+            }
+        }
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
