@@ -238,7 +238,15 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_connect(ChiakiTakion *takion, Chiaki
 		goto error_pipe;
 	}
 
-	const int rcvbuf_val = takion->a_rwnd;
+	int rcvbuf_val = takion->a_rwnd;
+#if defined(__ANDROID__)
+	/* Keep the protocol's advertised window unchanged. This is only the OS
+	 * datagram receive queue: video decoding shares the packet-handler thread,
+	 * so a burst must survive brief decoder/scheduler stalls without UDP loss.
+	 */
+	if(info->enable_crypt)
+		rcvbuf_val = 4 * 1024 * 1024;
+#endif
 	int r = setsockopt(takion->sock, SOL_SOCKET, SO_RCVBUF, (const void *)&rcvbuf_val, sizeof(rcvbuf_val));
 	if(r < 0)
 	{
@@ -246,6 +254,12 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_connect(ChiakiTakion *takion, Chiaki
 		ret = CHIAKI_ERR_NETWORK;
 		goto error_sock;
 	}
+#if defined(__ANDROID__)
+	int actual_rcvbuf = 0;
+	socklen_t actual_rcvbuf_size = sizeof(actual_rcvbuf);
+	if(getsockopt(takion->sock, SOL_SOCKET, SO_RCVBUF, (void *)&actual_rcvbuf, &actual_rcvbuf_size) == 0)
+		CHIAKI_LOGI(takion->log, "Takion UDP receive buffer: requested=%d, actual=%d", rcvbuf_val, actual_rcvbuf);
+#endif
 
 	if(info->ip_dontfrag)
 	{
