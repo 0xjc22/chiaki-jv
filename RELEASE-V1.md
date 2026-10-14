@@ -1,19 +1,23 @@
-# chiaki-jv — Version 1 (v1.0.1)
+# chiaki-jv — Version 1 (v1.1.0)
 
 Fork of [gameblabla/chiaki-up](https://github.com/gameblabla/chiaki-up) at upstream commit 86e38bf, hardened for HEVC streaming and cellular remote play. Developed and verified on a Samsung Z Fold 8 streaming from a PS5 over LAN and over a WireGuard cellular VPN (FreshTomato 2026.3 router).
 
 Repository: https://github.com/0xjc22/chiaki-jv
 Release branch: chiaki-jv (default)
-Tags: v1.0.0 (first cut), v1.0.1 (current release)
+Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (current release)
+
+## v1.1.0 changes
+
+- The controller SELECT button now maps to the PS5 touchpad press (BUTTON_TOUCHPAD) instead of Share, for games that open menus via the touchpad. Momentary like any other button: held = pressed, released = up, composes with face buttons. Share is no longer bound to a controller button.
 
 ## Artifacts
 
-v1.0.1 debug APK (experimental package, installs next to the upstream app):
-- Path: /home/jc/dl/chiaki-up-hevc-v1.0.1-arm64.apk
-- SHA256: c27d8bc84de421bf3f5e9efa4f4f4bc0c1d45f1fce73627b4d69daebff649299
+v1.1.0 debug APK (experimental package, installs next to the upstream app):
+- Path: /home/jc/dl/chiaki-up-hevc-v1.1.0-arm64.apk
+- SHA256: c6548f22333a52860c9f51e57ed720c364220c31dd301a978bcf44dc9c8bb11a
 - Package: com.gameblabla.chiaki.hevcfix
-- versionCode 31, versionName 1.0.1-hevcfix
-- Label: Chiaki-Up HEVC 1.0.1
+- versionCode 32, versionName 1.1.0-hevcfix
+- Label: Chiaki-Up HEVC 1.1.0
 - arm64-v8a, minSdk 30, debug-signed, v2 signature, ZIP/ELF 16 KiB aligned
 
 ## What is fixed or added

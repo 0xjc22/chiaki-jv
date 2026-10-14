@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess, os, shutil, hashlib, zipfile, struct
 
 src = Path("android/app/build/outputs/apk/debug/app-debug.apk")
-dst = Path("/home/jc/dl/chiaki-up-hevc-v1.0.1-arm64.apk")
+dst = Path("/home/jc/dl/chiaki-up-hevc-v1.1.0-arm64.apk")
 if dst.exists():
     dst.unlink()
 shutil.copy2(src, dst)
