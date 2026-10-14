@@ -22,7 +22,9 @@ Baseline receiver defines FLUSH_CORRUPT_FRAMES. frameprocessor.c concatenates re
 
 Correction: reject failed assembly and FEC-failed samples before callback; set frame_index_prev=current to avoid repeatedly flushing that frame; keep prev_complete unchanged so the existing next-frame corrupt-range report remains intact. Complete and successfully repaired frames continue to decode. No Wi-Fi settings, bitrate, rendering changes, vendor codec keys or new IDR protocol messages were bundled.
 
-This is a correctness/recovery guard, not restoration of lost packets. It may replace distorted output with a brief held frame. Later predictive frames may still depend on a missing reference; a full upstream IDR-request/recovery backport remains a possible next step, not an implemented or verified fix here.
+This is a correctness/recovery guard, not restoration of lost packets. It may replace distorted output with a brief held frame. Later predictive frames may still depend on a missing reference.
+
+Note for v1.0.1 readers: the IDR-request/recovery backport landed after this v4-era snapshot (see RELEASE-V1.md): stream_connection_send_idr_request plus a throttled, episode-latched call on FEC failure. It is verified by host tests (test/video-receiver-corruption-test.py, test/stream-idr-request-test.py) but has not yet been observed firing on a live stream, so keep it host-verified-only in any claims.
 
 ## Verification
 

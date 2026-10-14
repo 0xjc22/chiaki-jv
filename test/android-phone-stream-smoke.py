@@ -20,6 +20,11 @@ parser.add_argument('--output',required=True)
 args=parser.parse_args()
 package='com.gameblabla.chiaki.hevcfix'
 
+devices=subprocess.check_output(['adb','devices'],text=True).strip().splitlines()[1:]
+if not any('\tdevice' in line for line in devices):
+    print('SKIP no adb device connected')
+    raise SystemExit(0)
+
 def adb(*a):
     return subprocess.check_output(['adb',*a],text=True,timeout=15).strip()
 

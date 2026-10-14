@@ -31,6 +31,10 @@
 // VERY similar to SCTP, see RFC 4960
 
 #define TAKION_A_RWND 0x19000
+/* Android OS datagram queue for the encrypted stream socket only. The
+ * protocol window (TAKION_A_RWND above) is intentionally unchanged; this
+ * value only tunes how much UDP the kernel buffers locally. */
+#define TAKION_ANDROID_STREAM_RCVBUF (4 * 1024 * 1024)
 #define TAKION_OUTBOUND_STREAMS 0x64
 #define TAKION_INBOUND_STREAMS 0x64
 
@@ -243,22 +247,44 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_connect(ChiakiTakion *takion, Chiaki
 	/* Keep the protocol's advertised window unchanged. This is only the OS
 	 * datagram receive queue: video decoding shares the packet-handler thread,
 	 * so a burst must survive brief decoder/scheduler stalls without UDP loss.
+	 * The queue absorbs reordering bursts; damaged or late frames are still
+	 * dropped and recovered by the receiver's IDR path, so a long stall
+	 * drains stale frames rather than corrupting the stream.
 	 */
 	if(info->enable_crypt)
-		rcvbuf_val = 4 * 1024 * 1024;
+		rcvbuf_val = TAKION_ANDROID_STREAM_RCVBUF;
 #endif
 	int r = setsockopt(takion->sock, SOL_SOCKET, SO_RCVBUF, (const void *)&rcvbuf_val, sizeof(rcvbuf_val));
 	if(r < 0)
 	{
-		CHIAKI_LOGE(takion->log, "Takion failed to setsockopt SO_RCVBUF: %s", strerror(errno));
-		ret = CHIAKI_ERR_NETWORK;
-		goto error_sock;
+#if defined(__ANDROID__)
+		/* An optional buffering tweak must not block streaming: fall back to
+		 * the kernel default rather than aborting the connect. */
+		if(info->enable_crypt)
+			CHIAKI_LOGW(takion->log, "Takion failed to enlarge stream receive buffer: %s", strerror(errno));
+		else
+#endif
+		{
+			CHIAKI_LOGE(takion->log, "Takion failed to setsockopt SO_RCVBUF: %s", strerror(errno));
+			ret = CHIAKI_ERR_NETWORK;
+			goto error_sock;
+		}
 	}
 #if defined(__ANDROID__)
 	int actual_rcvbuf = 0;
 	socklen_t actual_rcvbuf_size = sizeof(actual_rcvbuf);
 	if(getsockopt(takion->sock, SOL_SOCKET, SO_RCVBUF, (void *)&actual_rcvbuf, &actual_rcvbuf_size) == 0)
-		CHIAKI_LOGI(takion->log, "Takion UDP receive buffer: requested=%d, actual=%d", rcvbuf_val, actual_rcvbuf);
+	{
+		const char *role = info->enable_crypt ? "stream" : "bootstrap";
+		CHIAKI_LOGI(takion->log, "Takion UDP receive buffer (%s): requested=%d, actual=%d", role, rcvbuf_val, actual_rcvbuf);
+		/* Linux accounts sk_rcvbuf at twice the requested value; anything
+		 * below 2x means the kernel clamped the request and the enlarged
+		 * queue did not materialize. */
+		if(info->enable_crypt && actual_rcvbuf < 2 * rcvbuf_val)
+			CHIAKI_LOGW(takion->log, "Takion stream receive buffer clamped by kernel: requested=%d, actual=%d", rcvbuf_val, actual_rcvbuf);
+	}
+	else
+		CHIAKI_LOGW(takion->log, "Takion failed to read back receive buffer size");
 #endif
 
 	if(info->ip_dontfrag)

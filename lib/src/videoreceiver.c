@@ -24,6 +24,7 @@ CHIAKI_EXPORT void chiaki_video_receiver_init(ChiakiVideoReceiver *video_receive
 	chiaki_frame_processor_init(&video_receiver->frame_processor, video_receiver->log);
 	video_receiver->packet_stats = packet_stats;
 	video_receiver->idr_request_prev_ms = 0;
+	video_receiver->idr_pending = false;
 }
 
 CHIAKI_EXPORT void chiaki_video_receiver_fini(ChiakiVideoReceiver *video_receiver)
@@ -125,24 +126,29 @@ static ChiakiErrorCode chiaki_video_receiver_flush_frame(ChiakiVideoReceiver *vi
 	if(flush_result == CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FAILED
 		|| flush_result == CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FEC_FAILED)
 	{
-		/* Missing units were omitted from this access unit. Never feed that
-		 * truncated bitstream to a decoder and poison its reference pictures.
-		 * Mark this frame handled, but keep prev_complete unchanged so the
-		 * next frame reports the missing/corrupt range to the console.
-		 */
 		video_receiver->frame_index_prev = video_receiver->frame_index_cur;
-		CHIAKI_LOGW(video_receiver->log, "Dropping incomplete video frame %d before decoding", (int)video_receiver->frame_index_cur);
-		/* Ask the console for a fresh keyframe so the decoder can recover.
-		 * Throttled: a burst of damaged frames triggers at most one request
-		 * per 500 ms, mirroring chiaki-ng's IDR-on-FEC-failure recovery.
+		/* Only FEC_FAILED means an access unit was actually dropped with
+		 * missing data; plain FAILED is an empty flush and needs no IDR.
+		 * Ask the console for a fresh keyframe so the decoder can recover:
+		 * one request per recovery episode (until a frame is delivered),
+		 * throttled to at most one successful request per 500 ms.
 		 */
-		uint64_t now_ms = chiaki_time_now_monotonic_ms();
-		if(video_receiver->idr_request_prev_ms == 0 || now_ms - video_receiver->idr_request_prev_ms >= 500)
+		if(flush_result == CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FEC_FAILED)
 		{
-			video_receiver->idr_request_prev_ms = now_ms;
-			ChiakiErrorCode idr_err = stream_connection_send_idr_request(&video_receiver->session->stream_connection);
-			if(idr_err != CHIAKI_ERR_SUCCESS)
-				CHIAKI_LOGW(video_receiver->log, "Failed to send IDR request after dropping incomplete frame");
+			CHIAKI_LOGW(video_receiver->log, "Dropping incomplete video frame %d before decoding", (int)video_receiver->frame_index_cur);
+			uint64_t now_ms = chiaki_time_now_monotonic_ms();
+			if(!video_receiver->idr_pending
+				&& (video_receiver->idr_request_prev_ms == 0 || now_ms - video_receiver->idr_request_prev_ms >= 500))
+			{
+				ChiakiErrorCode idr_err = stream_connection_send_idr_request(&video_receiver->session->stream_connection);
+				if(idr_err == CHIAKI_ERR_SUCCESS)
+				{
+					video_receiver->idr_pending = true;
+					video_receiver->idr_request_prev_ms = now_ms;
+				}
+				else
+					CHIAKI_LOGW(video_receiver->log, "Failed to send IDR request after dropping incomplete frame");
+			}
 		}
 		return CHIAKI_ERR_UNKNOWN;
 	}
@@ -162,7 +168,10 @@ static ChiakiErrorCode chiaki_video_receiver_flush_frame(ChiakiVideoReceiver *vi
 	video_receiver->frame_index_prev = video_receiver->frame_index_cur;
 
 	if(succ)
+	{
 		video_receiver->frame_index_prev_complete = video_receiver->frame_index_cur;
+		video_receiver->idr_pending = false;
+	}
 
 	return CHIAKI_ERR_SUCCESS;
 }

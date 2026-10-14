@@ -7,21 +7,29 @@ import tempfile
 
 root=Path(__file__).resolve().parents[1]
 s=(root/'lib/src/takion.c').read_text()
-start=s.index('\tconst int rcvbuf_val = takion->a_rwnd;') if '\tconst int rcvbuf_val = takion->a_rwnd;' in s else s.index('\tint rcvbuf_val = takion->a_rwnd;')
+start=s.index('\tint rcvbuf_val = takion->a_rwnd;')
 block=s[start:s.index('\tif(info->ip_dontfrag)',start)]
+assert 'TAKION_ANDROID_STREAM_RCVBUF' in block, 'named constant missing from extracted block'
+assert 'enable_crypt' in block and 'SO_RCVBUF' in block, 'extracted block does not contain socket setup'
 harness=r'''
 #include <stdbool.h>
 #include <stdio.h>
 #include <sys/socket.h>
+#include <string.h>
+#include <errno.h>
 #define CHIAKI_ERR_NETWORK -1
-#define CHIAKI_LOGE(...) ((void)0)
-#define CHIAKI_LOGI(...) ((void)0)
-#define CHIAKI_LOGW(...) ((void)0)
+#define TAKION_ANDROID_STREAM_RCVBUF (4*1024*1024)
+static void log_emit(const void *log, const char *fmt, ...) { (void)log; (void)fmt; }
+#define CHIAKI_LOGE(...) log_emit(__VA_ARGS__)
+#define CHIAKI_LOGI(...) log_emit(__VA_ARGS__)
+static int warn_count;
+#define CHIAKI_LOGW(...) do { warn_count++; } while(0)
 struct Takion { int sock,a_rwnd; void *log; };
 struct Info { bool enable_crypt; };
 static int requested;
+static int clamp;
 static int fake_setsockopt(int s,int l,int o,const void *p,socklen_t n) { (void)s;(void)l;(void)o;(void)n; requested=*(const int*)p; return 0; }
-static int fake_getsockopt(int s,int l,int o,void *p,socklen_t *n) { (void)s;(void)l;(void)o;(void)n; *(int*)p=requested*2; return 0; }
+static int fake_getsockopt(int s,int l,int o,void *p,socklen_t *n) { (void)s;(void)l;(void)o;(void)n; *(int*)p=clamp?requested/2:requested*2; return 0; }
 #define setsockopt fake_setsockopt
 #define getsockopt fake_getsockopt
 static int configure(bool stream) {
@@ -34,6 +42,7 @@ error_sock:
     return ret;
 }
 int main(void) {
+    (void)warn_count;
 #ifdef __ANDROID__
     int expected=4*1024*1024;
 #else
@@ -42,6 +51,12 @@ int main(void) {
     int actual=configure(true);
     if(actual!=expected) { fprintf(stderr,"FAIL stream receive buffer %d, expected %d\n",actual,expected); return 1; }
     if(configure(false)!=0x19000) { fputs("FAIL bootstrap receive buffer changed\n",stderr); return 1; }
+#ifdef __ANDROID__
+    clamp=1; configure(true);
+    if(warn_count==0) { fputs("FAIL kernel clamp not warned\n",stderr); return 1; }
+    puts("PASS clamped stream buffer warned");
+    clamp=0;
+#endif
 #ifdef __ANDROID__
     puts("PASS Android streaming receive capacity; bootstrap unchanged");
 #else

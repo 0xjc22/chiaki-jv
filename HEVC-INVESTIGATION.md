@@ -1,5 +1,7 @@
 # Chiaki-Up HEVC input framing investigation
 
+Point-in-time investigation document from the v1 development session. It describes the code as it existed at 86e38bf and is superseded by RELEASE-V1.md for the current state: FLUSH_CORRUPT_FRAMES no longer exists (damaged frames are rejected with IDR recovery), the Oboe change IS a pinned submodule revision on the 0xjc22/oboe fork, and the historical harness pass counts below were measured with an earlier harness revision (re-measured counts differ; see RELEASE-V1.md).
+
 Source checkout: /home/jc/chiaki-up-hevc-fix
 Base: gameblabla/chiaki-up, 86e38bf (separate clone; DeepSeek checkout untouched).
 APK: /home/jc/dl/chiaki-up-hevc-test-arm64.apk

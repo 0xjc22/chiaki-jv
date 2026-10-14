@@ -24,12 +24,13 @@ harness = r'''
 #include <string.h>
 #include <sys/types.h>
 #define INPUT_BUFFER_TIMEOUT_MS 10
+#define INPUT_BUFFER_DEQUEUE_ATTEMPTS 3
 #define AMEDIA_OK 0
 #define CHIAKI_LOGE(...) ((void)0)
 #define CHIAKI_LOGI(...) ((void)0)
 #define CHIAKI_LOGW(...) ((void)0)
 typedef int media_status_t;
-typedef struct { void *codec; int codec_mutex; void *log; uint64_t timestamp_cur; } AndroidChiakiVideoDecoder;
+typedef struct { void *codec; int codec_mutex; void *log; uint64_t timestamp_cur; bool input_capacity_logged; bool codec_missing_logged; } AndroidChiakiVideoDecoder;
 static int locks, queues, deqs, fail_queue, timeout, null_buffer;
 static size_t capacity = 8, queued_sizes[8];
 static uint8_t storage[32], submitted[32];
@@ -57,7 +58,7 @@ int main(int argc, char **argv) {
     bool ok;
     if(!strcmp(scenario,"oversize")) {
         ok=android_chiaki_video_decoder_video_sample(frame,16,&d);
-        CHECK(!ok); CHECK(queues==1); CHECK(queued_sizes[0]==0); CHECK(d.timestamp_cur==100);
+        CHECK(!ok); CHECK(queues==1); CHECK(queued_sizes[0]==0); CHECK(pts[0]==101); CHECK(d.timestamp_cur==100);
     } else if(!strcmp(scenario,"complete")) {
         ok=android_chiaki_video_decoder_video_sample(frame,8,&d);
         CHECK(ok); CHECK(queues==1); CHECK(queued_sizes[0]==8); CHECK(pts[0]==1000); CHECK(d.timestamp_cur==1000); CHECK(!memcmp(frame,submitted,8));
@@ -65,11 +66,11 @@ int main(int argc, char **argv) {
     } else if(!strcmp(scenario,"queue_failure")) {
         fail_queue=1; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok); CHECK(queues==1);
     } else if(!strcmp(scenario,"timeout")) {
-        timeout=1; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok); CHECK(queues==0);
+        timeout=1; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok); CHECK(queues==0); CHECK(deqs==3);
     } else if(!strcmp(scenario,"uninitialized")) {
-        d.codec=NULL; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok); CHECK(deqs==0);
+        d.codec=NULL; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(ok); CHECK(deqs==0);
     } else if(!strcmp(scenario,"zero_capacity")) {
-        capacity=0; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok); CHECK(queues==1); CHECK(queued_sizes[0]==0);
+        capacity=0; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok); CHECK(queues==1); CHECK(queued_sizes[0]==0); CHECK(pts[0]==101);
     } else if(!strcmp(scenario,"null_buffer")) {
         null_buffer=1; ok=android_chiaki_video_decoder_video_sample(frame,8,&d); CHECK(!ok);
     } else if(!strcmp(scenario,"empty")) {

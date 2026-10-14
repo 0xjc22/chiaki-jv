@@ -1,25 +1,43 @@
 #!/usr/bin/env python3
-"""Execute the actual Activity attach callback against an attached-view seam."""
+"""Execute the actual Activity attach/focus callbacks against an attached-view seam."""
 from pathlib import Path
 import os,re,subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'android/app/src/main/java/com/metallic/chiaki/stream/StreamActivity.kt').read_text()
 m=re.search(r'override fun onAttachedToWindow\(\)\s*\{',s)
 assert m, 'Stream window never requests immediate joystick dispatch'
-start=m.start(); pos=m.end(); depth=1
-while depth:
-    if s[pos]=='{': depth+=1
-    elif s[pos]=='}': depth-=1
-    pos+=1
-method=s[start:pos]
+start=m.start()
+q=re.search(r'private fun requestUnbufferedJoystickDispatch\(\)',s)
+assert q, 'missing self-healing re-request helper'
+pos=q.end(); depth=0; end=None
+for i in range(pos,len(s)):
+    if s[i]=='{': depth+=1
+    elif s[i]=='}':
+        depth-=1
+        if depth==0: end=i+1; break
+assert end, 'unterminated request helper'
+attach_block=s[start:end]
+f=re.search(r'override fun onWindowFocusChanged\(hasFocus: Boolean\)',s)
+assert f, 'missing focus re-request'
+fpos=f.end(); depth=0; fend=None
+for i in range(fpos,len(s)):
+    if s[i]=='{': depth+=1
+    elif s[i]=='}':
+        depth-=1
+        if depth==0: fend=i+1; break
+assert fend, 'unterminated focus callback'
+focus_block=s[f.start():fend]
+assert 'requestUnbufferedJoystickDispatch' in focus_block, 'focus callback does not re-request'
 code='''
 object InputDevice { const val SOURCE_CLASS_JOYSTICK=16 }
 object android { object util { object Log { fun i(tag:String,message:String) { check(tag.isNotEmpty() && message.isNotEmpty()) } } } }
 class View { var attached=false; val requests=mutableListOf<Int>(); fun requestUnbufferedDispatch(source:Int) { check(attached); requests.add(source) } }
 class Window { val decorView=View() }
-open class Base { val window=Window(); open fun onAttachedToWindow() { window.decorView.attached=true } }
+open class Base { val window=Window(); open fun onAttachedToWindow() { window.decorView.attached=true } open fun onWindowFocusChanged(hasFocus:Boolean) {} }
 class Activity: Base() {
-'''+method+'''
+'''+attach_block+'''
+private fun hideSystemUI() {}
+'''+focus_block+'''
 }
 fun main() {
     val a=Activity()
@@ -29,7 +47,11 @@ fun main() {
     a.window.decorView.attached=false
     a.onAttachedToWindow()
     check(a.window.decorView.requests==listOf(16,16))
-    println("PASS actual Activity callback: joystick-only unbuffering, after attachment, reapplied on reattach")
+    a.onWindowFocusChanged(false)
+    check(a.window.decorView.requests.size==2)
+    a.onWindowFocusChanged(true)
+    check(a.window.decorView.requests==listOf(16,16,16))
+    println("PASS actual Activity callbacks: joystick-only unbuffering, reapplied on reattach and refocus, silent on focus loss")
 }
 '''
 cache=Path.home()/'.gradle/caches/modules-2/files-2.1'

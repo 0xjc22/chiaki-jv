@@ -2,6 +2,8 @@ package com.gameblabla.chiaki.session
 
 import android.content.Context
 import android.hardware.*
+import android.os.SystemClock
+import android.util.Log
 import android.view.*
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleObserver
@@ -13,6 +15,12 @@ import com.gameblabla.chiaki.lib.ControllerState
 class StreamInput(val context: Context, val preferences: Preferences)
 {
 	var controllerStateChangedCallback: ((ControllerState) -> Unit)? = null
+
+	/** Invoked when batched joystick delivery is observed, so the caller can
+	 *  re-issue the unbuffered dispatch request. */
+	var unbufferedDispatchRequestCallback: (() -> Unit)? = null
+
+	private var warnedBatchedAfterUnbuffered = false
 
 	val controllerState: ControllerState get()
 	{
@@ -179,10 +187,21 @@ class StreamInput(val context: Context, val preferences: Preferences)
 	{
 		if(event.source and InputDevice.SOURCE_CLASS_JOYSTICK != InputDevice.SOURCE_CLASS_JOYSTICK)
 			return false
-		val nowMs = android.os.SystemClock.uptimeMillis()
+		if(event.historySize > 0)
+		{
+			// Batched delivery means the unbuffered request was cleared by a
+			// focus change; re-issue it and say so once.
+			unbufferedDispatchRequestCallback?.invoke()
+			if(!warnedBatchedAfterUnbuffered)
+			{
+				Log.w("Chiaki", "Batched joystick events observed; re-requesting unbuffered dispatch")
+				warnedBatchedAfterUnbuffered = true
+			}
+		}
+		val nowMs = SystemClock.uptimeMillis()
 		val oldestMs = if(event.historySize > 0) event.getHistoricalEventTime(0) else event.eventTime
 		controllerInputTiming.record(nowMs, event.eventTime, oldestMs, event.historySize)?.let {
-			android.util.Log.i("Chiaki", "Controller Android dispatch: latestAvgMs=${it.latestAvgMs}, oldestAvgMs=${it.oldestAvgMs}, oldestMaxMs=${it.oldestMaxMs}, events=${it.events}, batchedEvents=${it.batchedEvents}, samples=${it.samples}")
+			Log.i("Chiaki", "Controller Android dispatch: latestAvgMs=${it.latestAvgMs}, oldestAvgMs=${it.oldestAvgMs}, oldestMaxMs=${it.oldestMaxMs}, events=${it.events}, batchedEvents=${it.batchedEvents}, samples=${it.samples}")
 		}
 		fun Float.signedAxis() = (this * Short.MAX_VALUE).toInt().toShort()
 		fun Float.unsignedAxis() = (this * UByte.MAX_VALUE.toFloat()).toUInt().toUByte()

@@ -9,8 +9,10 @@ s=(root/'android/app/src/main/cpp/video-decoder.c').read_text()
 start=s.rindex('static void *android_chiaki_video_decoder_output_thread_func(void *user)')
 block=s[start:]
 harness=r'''
+#define _DEFAULT_SOURCE
 #include <stdbool.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdarg.h>

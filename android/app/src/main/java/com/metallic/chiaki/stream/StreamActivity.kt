@@ -98,6 +98,7 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 		//viewModel.session.attachToTextureView(textureView)
 		viewModel.session.attachToSurfaceView(binding.surfaceView)
 		viewModel.session.state.observe(this, Observer { this.stateChanged(it) })
+		viewModel.input.unbufferedDispatchRequestCallback = { requestUnbufferedJoystickDispatch() }
 		adjustStreamViewAspect()
 
 		if(Preferences(this).rumbleEnabled)
@@ -135,6 +136,11 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	override fun onAttachedToWindow()
 	{
 		super.onAttachedToWindow()
+		requestUnbufferedJoystickDispatch()
+	}
+
+	private fun requestUnbufferedJoystickDispatch()
+	{
 		// Joystick axes control a remote game, not a locally rendered scrolling view.
 		// Do not hold them until the next UI vsync; leave touchscreen batching alone.
 		window.decorView.requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_JOYSTICK)
@@ -209,7 +215,12 @@ class StreamActivity : AppCompatActivity(), View.OnSystemUiVisibilityChangeListe
 	{
 		super.onWindowFocusChanged(hasFocus)
 		if(hasFocus)
+		{
 			hideSystemUI()
+			// A view-focus change inside the tree can clear the request;
+			// window focus is the cheapest safe moment to re-apply it.
+			requestUnbufferedJoystickDispatch()
+		}
 	}
 
 	private fun hideSystemUI()

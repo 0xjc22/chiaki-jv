@@ -9,6 +9,10 @@ Chiaki-up is a Free and Open Source Software Client for PlayStation 4 and PlaySt
 It is a fork of the original Chiaki, that was abandoned and since forked to Chiaki-ng.
 Chiaki-ng however, does not support Android. This is an effort to at least keep it up to date for the latest Android devices.
 
+## chiaki-jv fork
+
+This repository is the **chiaki-jv** fork of Chiaki-Up (base commit 86e38bf). Version 1 hardens HEVC streaming and remote play; see [RELEASE-V1.md](RELEASE-V1.md) for the full change list, measurements and build prerequisites. The release branch is `chiaki-jv`, tagged `v1.0.0` / `v1.0.1`. The Oboe submodule is pinned to the companion fork github.com/0xjc22/oboe (branch `chiaki-jv`, tag `chiaki-jv-n1`).
+
 Do not expect me to add major features, this is simply me maintaining it until Chiaki-ng decides to look at Android support...
 if that ever happens.
 

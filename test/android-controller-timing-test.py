@@ -25,7 +25,12 @@ fun main() {
     val fresh=t.record(5000,5000,5000,0)!!
     check(fresh.events==2L && fresh.samples==2L && fresh.batchedEvents==0L)
     check(fresh.latestAvgMs==0.0 && fresh.oldestAvgMs==0.0 && fresh.oldestMaxMs==0L)
-    println("PASS actual Kotlin controller input timing: ages/history, invalid events, interval and reset")
+    check(t.record(50000,49999,49999,0)==null) // idle gap resets window, no one-sample report
+    check(t.record(51000,50999,50999,0)==null)
+    val resumed=t.record(53000,52999,52999,0)!!
+    check(resumed.events==2L && resumed.samples==2L && resumed.batchedEvents==0L)
+    check(resumed.latestAvgMs==1.0 && resumed.oldestAvgMs==1.0 && resumed.oldestMaxMs==1L)
+    println("PASS actual Kotlin controller input timing: ages/history, invalid events, interval, reset and idle-gap")
 }
 '''
 with tempfile.TemporaryDirectory(prefix='chiaki-controller-',dir=os.environ.get('TMPDIR')) as d:

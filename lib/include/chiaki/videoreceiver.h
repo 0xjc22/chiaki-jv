@@ -24,11 +24,12 @@ typedef struct chiaki_video_receiver_t
 	int profile_cur; // < 1 if no profile selected yet, else index in profiles
 
 	int32_t frame_index_cur; // frame that is currently being filled
-	int32_t frame_index_prev; // last frame that has been at least partially decoded
+	int32_t frame_index_prev; // last frame handled (decoded or rejected)
 	int32_t frame_index_prev_complete; // last frame that has been completely decoded
 	ChiakiFrameProcessor frame_processor;
 	ChiakiPacketStats *packet_stats;
 	uint64_t idr_request_prev_ms; // monotonic ms of the last IDR request after a dropped frame
+	bool idr_pending; // an IDR request is outstanding until a frame is delivered
 } ChiakiVideoReceiver;
 
 CHIAKI_EXPORT void chiaki_video_receiver_init(ChiakiVideoReceiver *video_receiver, struct chiaki_session_t *session, ChiakiPacketStats *packet_stats);

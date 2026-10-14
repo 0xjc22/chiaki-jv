@@ -10,8 +10,10 @@
 
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #define INPUT_BUFFER_TIMEOUT_MS 10
+#define INPUT_BUFFER_DEQUEUE_ATTEMPTS 3
 
 static uint64_t android_chiaki_video_decoder_time_us(void)
 {
@@ -32,31 +34,42 @@ ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *dec
 	decoder->target_height = target_height;
 	decoder->target_codec = codec;
 	decoder->shutdown_output = false;
+	decoder->input_capacity_logged = false;
+	decoder->codec_missing_logged = false;
 	return chiaki_mutex_init(&decoder->codec_mutex, false);
 }
 
 static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 {
 	chiaki_mutex_lock(&decoder->codec_mutex);
+	AMediaCodec *codec = decoder->codec;
+	if(!codec)
+	{
+		chiaki_mutex_unlock(&decoder->codec_mutex);
+		return;
+	}
 	decoder->shutdown_output = true;
-	ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, 1000);
+	ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(codec, 1000);
 	if(codec_buf_index >= 0)
 	{
 		CHIAKI_LOGI(decoder->log, "Video Decoder sending EOS buffer");
-		AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, 0, decoder->timestamp_cur++, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
-		AMediaCodec_stop(decoder->codec);
-		chiaki_mutex_unlock(&decoder->codec_mutex);
-		chiaki_thread_join(&decoder->output_thread, NULL);
+		AMediaCodec_queueInputBuffer(codec, (size_t)codec_buf_index, 0, 0, decoder->timestamp_cur++, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
 	}
 	else
-	{
 		CHIAKI_LOGE(decoder->log, "Failed to get input buffer for shutting down Video Decoder!");
-		AMediaCodec_stop(decoder->codec);
-		chiaki_mutex_unlock(&decoder->codec_mutex);
-	}
-	AMediaCodec_delete(decoder->codec);
-	decoder->codec = NULL;
+	AMediaCodec_stop(codec);
+	/* Never join while holding the mutex: the output thread reads
+	 * shutdown_output under it on its way out. */
+	chiaki_mutex_unlock(&decoder->codec_mutex);
+	chiaki_thread_join(&decoder->output_thread, NULL);
+	/* Delete under the mutex so no video_sample can be inside a codec
+	 * call on this AMediaCodec while it is being freed. */
+	chiaki_mutex_lock(&decoder->codec_mutex);
+	if(decoder->codec == codec)
+		decoder->codec = NULL;
 	decoder->shutdown_output = false;
+	chiaki_mutex_unlock(&decoder->codec_mutex);
+	AMediaCodec_delete(codec);
 }
 
 void android_chiaki_video_decoder_fini(AndroidChiakiVideoDecoder *decoder)
@@ -72,7 +85,11 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 
 	if(!surface)
 	{
-		if(decoder->codec)
+		bool had_codec = decoder->codec != NULL;
+		/* kill_decoder takes the mutex itself; holding it here would
+		 * deadlock on its internal lock. */
+		chiaki_mutex_unlock(&decoder->codec_mutex);
+		if(had_codec)
 		{
 			kill_decoder(decoder);
 			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
@@ -132,16 +149,24 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	}
 
 	media_status_t r = AMediaCodec_configure(decoder->codec, format, decoder->window, NULL, 0);
-	if(r != AMEDIA_OK && request_low_latency)
+	if(r != AMEDIA_OK)
 	{
-		CHIAKI_LOGW(decoder->log, "HEVC low-latency configure failed (%d), retrying normal mode", (int)r);
-		/* Recreate rather than assume the failed configure left a usable codec. */
+		/* Any optional key (low-latency, max-input-size) can be rejected by
+		 * an old component. Recreate and retry with a minimal format so a
+		 * hint never makes the session fatal. */
+		CHIAKI_LOGW(decoder->log, "Configure failed (%d) with full format, retrying minimal", (int)r);
 		AMediaCodec_delete(decoder->codec);
 		decoder->codec = AMediaCodec_createDecoderByType(mime);
 		if(decoder->codec)
 		{
-			AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_LOW_LATENCY, 0);
-			r = AMediaCodec_configure(decoder->codec, format, decoder->window, NULL, 0);
+			AMediaFormat *minimal = AMediaFormat_new();
+			AMediaFormat_setString(minimal, AMEDIAFORMAT_KEY_MIME, mime);
+			AMediaFormat_setInt32(minimal, AMEDIAFORMAT_KEY_WIDTH, decoder->target_width);
+			AMediaFormat_setInt32(minimal, AMEDIAFORMAT_KEY_HEIGHT, decoder->target_height);
+			r = AMediaCodec_configure(decoder->codec, minimal, decoder->window, NULL, 0);
+			AMediaFormat_delete(minimal);
+			if(r == AMEDIA_OK)
+				CHIAKI_LOGI(decoder->log, "Configured with minimal format after full-format rejection");
 		}
 	}
 	if(r != AMEDIA_OK)
@@ -158,6 +183,8 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 		CHIAKI_LOGE(decoder->log, "AMediaCodec_start() failed: %d", (int)r);
 		goto error_codec;
 	}
+	decoder->input_capacity_logged = false;
+	decoder->codec_missing_logged = false;
 
 	char *codec_name = NULL;
 	if(AMediaCodec_getName(decoder->codec, &codec_name) == AMEDIA_OK && codec_name)
@@ -202,7 +229,16 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, vo
 
 	if(!decoder->codec)
 	{
-		CHIAKI_LOGE(decoder->log, "Received video data, but decoder is not initialized!");
+		/* No codec means the frame is discarded by design (surface not
+		 * attached yet or configure failed), not a corrupt frame. Report
+		 * success so the receiver does not spam the console with
+		 * corrupt-frame reports for an expected condition. */
+		if(!decoder->codec_missing_logged)
+		{
+			CHIAKI_LOGW(decoder->log, "Received video data, but decoder is not initialized; discarding frames");
+			decoder->codec_missing_logged = true;
+		}
+		success = true;
 		goto beach;
 	}
 
@@ -214,6 +250,8 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, vo
 
 	uint64_t sample_time_us = android_chiaki_video_decoder_time_us();
 	ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, INPUT_BUFFER_TIMEOUT_MS * 1000);
+	for(int attempt = 1; codec_buf_index < 0 && attempt < INPUT_BUFFER_DEQUEUE_ATTEMPTS; attempt++)
+		codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, INPUT_BUFFER_TIMEOUT_MS * 1000);
 	if(codec_buf_index < 0)
 	{
 		CHIAKI_LOGE(decoder->log, "Failed to get input buffer for sample of %zu bytes", buf_size);
@@ -222,8 +260,11 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, vo
 
 	size_t codec_buf_size = 0;
 	uint8_t *codec_buf = AMediaCodec_getInputBuffer(decoder->codec, (size_t)codec_buf_index, &codec_buf_size);
-	if(decoder->timestamp_cur == 0)
+	if(!decoder->input_capacity_logged)
+	{
 		CHIAKI_LOGI(decoder->log, "Video decoder input capacity: %zu bytes", codec_buf_size);
+		decoder->input_capacity_logged = true;
+	}
 	if(!codec_buf || buf_size > codec_buf_size)
 	{
 		/* Never split an access unit into unmarked, arbitrary byte fragments.
@@ -233,7 +274,7 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, vo
 		CHIAKI_LOGE(decoder->log, "Cannot submit complete video sample: size=%zu, capacity=%zu, buffer=%p",
 				buf_size, codec_buf_size, (void *)codec_buf);
 		media_status_t status = AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index,
-				0, 0, decoder->timestamp_cur, 0);
+				0, 0, decoder->timestamp_cur + 1, 0);
 		if(status != AMEDIA_OK)
 			CHIAKI_LOGE(decoder->log, "Failed to return unused input buffer: %d", (int)status);
 		goto beach;
@@ -262,6 +303,7 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 {
 	AndroidChiakiVideoDecoder *decoder = user;
 	uint64_t stats_start_us = 0, stats_total_us = 0, stats_max_us = 0, stats_frames = 0;
+	bool output_error_logged = false;
 
 	while(1)
 	{
@@ -269,6 +311,7 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 		ssize_t status = AMediaCodec_dequeueOutputBuffer(decoder->codec, &info, -1);
 		if(status >= 0)
 		{
+			output_error_logged = false;
 			uint64_t now_us = 0, delay_us = 0;
 			bool timed_frame = info.size > 0
 				&& !(info.flags & (AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM | AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG));
@@ -314,6 +357,14 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 				CHIAKI_LOGI(decoder->log, "Video Decoder Output Thread detected shutdown after reported error");
 				break;
 			}
+			/* A persistent codec error would otherwise spin this core at
+			 * 100 % while the latency diagnostics silently go dark. */
+			if(status < 0 && !output_error_logged)
+			{
+				CHIAKI_LOGE(decoder->log, "AMediaCodec_dequeueOutputBuffer() error: %d", (int)status);
+				output_error_logged = true;
+			}
+			usleep(2000);
 		}
 	}
 

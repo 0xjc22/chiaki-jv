@@ -23,6 +23,8 @@ typedef struct android_chiaki_video_decoder_t
 	int32_t target_width;
 	int32_t target_height;
 	ChiakiCodec target_codec;
+	bool input_capacity_logged;
+	bool codec_missing_logged;
 } AndroidChiakiVideoDecoder;
 
 ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *decoder, ChiakiLog *log, int32_t target_width, int32_t target_height, ChiakiCodec codec);

@@ -7,6 +7,7 @@ import tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'android/app/src/main/cpp/video-decoder.c').read_text()
 block=s[s.index('\tAMediaFormat *format = AMediaFormat_new();'):s.index('\tmedia_status_t r = AMediaCodec_configure(')]
+assert len(block) > 400 and 'AMEDIAFORMAT_KEY_MAX_INPUT_SIZE' in block, 'extracted decoder format block is empty or narrowed'
 harness=r'''
 #include <stdint.h>
 #include <stdbool.h>
