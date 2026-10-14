@@ -28,6 +28,7 @@ typedef struct chiaki_video_receiver_t
 	int32_t frame_index_prev_complete; // last frame that has been completely decoded
 	ChiakiFrameProcessor frame_processor;
 	ChiakiPacketStats *packet_stats;
+	uint64_t idr_request_prev_ms; // monotonic ms of the last IDR request after a dropped frame
 } ChiakiVideoReceiver;
 
 CHIAKI_EXPORT void chiaki_video_receiver_init(ChiakiVideoReceiver *video_receiver, struct chiaki_session_t *session, ChiakiPacketStats *packet_stats);

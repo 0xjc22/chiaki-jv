@@ -2,6 +2,8 @@
 
 #include <chiaki/videoreceiver.h>
 #include <chiaki/session.h>
+#include <chiaki/streamconnection.h>
+#include <chiaki/time.h>
 
 #include <string.h>
 
@@ -21,6 +23,7 @@ CHIAKI_EXPORT void chiaki_video_receiver_init(ChiakiVideoReceiver *video_receive
 
 	chiaki_frame_processor_init(&video_receiver->frame_processor, video_receiver->log);
 	video_receiver->packet_stats = packet_stats;
+	video_receiver->idr_request_prev_ms = 0;
 }
 
 CHIAKI_EXPORT void chiaki_video_receiver_fini(ChiakiVideoReceiver *video_receiver)
@@ -113,8 +116,6 @@ CHIAKI_EXPORT void chiaki_video_receiver_av_packet(ChiakiVideoReceiver *video_re
 	}
 }
 
-#define FLUSH_CORRUPT_FRAMES
-
 static ChiakiErrorCode chiaki_video_receiver_flush_frame(ChiakiVideoReceiver *video_receiver)
 {
 	uint8_t *frame;
@@ -122,18 +123,31 @@ static ChiakiErrorCode chiaki_video_receiver_flush_frame(ChiakiVideoReceiver *vi
 	ChiakiFrameProcessorFlushResult flush_result = chiaki_frame_processor_flush(&video_receiver->frame_processor, &frame, &frame_size);
 
 	if(flush_result == CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FAILED
-#ifndef FLUSH_CORRUPT_FRAMES
-		|| flush_result == CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FEC_FAILED
-#endif
-		)
+		|| flush_result == CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FEC_FAILED)
 	{
-		CHIAKI_LOGW(video_receiver->log, "Failed to complete frame %d", (int)video_receiver->frame_index_cur);
+		/* Missing units were omitted from this access unit. Never feed that
+		 * truncated bitstream to a decoder and poison its reference pictures.
+		 * Mark this frame handled, but keep prev_complete unchanged so the
+		 * next frame reports the missing/corrupt range to the console.
+		 */
+		video_receiver->frame_index_prev = video_receiver->frame_index_cur;
+		CHIAKI_LOGW(video_receiver->log, "Dropping incomplete video frame %d before decoding", (int)video_receiver->frame_index_cur);
+		/* Ask the console for a fresh keyframe so the decoder can recover.
+		 * Throttled: a burst of damaged frames triggers at most one request
+		 * per 500 ms, mirroring chiaki-ng's IDR-on-FEC-failure recovery.
+		 */
+		uint64_t now_ms = chiaki_time_now_monotonic_ms();
+		if(video_receiver->idr_request_prev_ms == 0 || now_ms - video_receiver->idr_request_prev_ms >= 500)
+		{
+			video_receiver->idr_request_prev_ms = now_ms;
+			ChiakiErrorCode idr_err = stream_connection_send_idr_request(&video_receiver->session->stream_connection);
+			if(idr_err != CHIAKI_ERR_SUCCESS)
+				CHIAKI_LOGW(video_receiver->log, "Failed to send IDR request after dropping incomplete frame");
+		}
 		return CHIAKI_ERR_UNKNOWN;
 	}
 
-	// TODO: Error Concealment on CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FEC_FAILED
-
-	bool succ = flush_result != CHIAKI_FRAME_PROCESSOR_FLUSH_RESULT_FEC_FAILED;
+	bool succ = true;
 
 	if(video_receiver->session->video_sample_cb)
 	{
