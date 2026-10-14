@@ -488,12 +488,11 @@ ctrl_failed:
 		session->dontfrag = false;
 	}
 
-	/* Cap the video stream packet size so encrypted-tunnel paths survive.
-	 * The PS5 packetizes video to the launchspec MTU. 1280 bytes plus 28
-	 * bytes of UDP/IP headers fits inside a 1420-byte tunnel MTU minus 60
-	 * bytes of WireGuard/UDP/IP overhead (~52 bytes of margin); larger
-	 * packets fragment in the tunnel and lost or late fragments destroy
-	 * whole frames on jittery links. */
+	/* Cap video packetization for the tested tunnel path. With IPv4,
+	 * 1280 bytes plus 28 bytes of UDP/IP headers fits the router's 1420-byte
+	 * WireGuard interface MTU (which already describes inner packets).
+	 * Smaller path MTUs or different encapsulation can still fragment;
+	 * a fixed cap is not a universal path-MTU guarantee. */
 	if(session->mtu_in > 1280)
 	{
 		CHIAKI_LOGI(session->log, "Capping stream MTU %u -> 1280 for tunnel-friendly packetization", session->mtu_in);

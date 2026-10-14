@@ -247,9 +247,9 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_takion_connect(ChiakiTakion *takion, Chiaki
 	/* Keep the protocol's advertised window unchanged. This is only the OS
 	 * datagram receive queue: video decoding shares the packet-handler thread,
 	 * so a burst must survive brief decoder/scheduler stalls without UDP loss.
-	 * The queue absorbs reordering bursts; damaged or late frames are still
-	 * dropped and recovered by the receiver's IDR path, so a long stall
-	 * drains stale frames rather than corrupting the stream.
+	 * The queue absorbs bursts; FEC-damaged frames are rejected by the receiver.
+	 * Complete queued frames are not discarded by age, so a long consumer
+	 * stall can still accumulate playback latency.
 	 */
 	if(info->enable_crypt)
 		rcvbuf_val = TAKION_ANDROID_STREAM_RCVBUF;

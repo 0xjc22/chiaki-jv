@@ -27,9 +27,9 @@ static int warn_count;
 struct Takion { int sock,a_rwnd; void *log; };
 struct Info { bool enable_crypt; };
 static int requested;
-static int clamp;
-static int fake_setsockopt(int s,int l,int o,const void *p,socklen_t n) { (void)s;(void)l;(void)o;(void)n; requested=*(const int*)p; return 0; }
-static int fake_getsockopt(int s,int l,int o,void *p,socklen_t *n) { (void)s;(void)l;(void)o;(void)n; *(int*)p=clamp?requested/2:requested*2; return 0; }
+static int clamp, fail_set, fail_get;
+static int fake_setsockopt(int s,int l,int o,const void *p,socklen_t n) { (void)s;(void)l;(void)o;(void)n; requested=*(const int*)p; if(fail_set) { errno=EPERM; return -1; } return 0; }
+static int fake_getsockopt(int s,int l,int o,void *p,socklen_t *n) { (void)s;(void)l;(void)o;(void)n; *(int*)p=clamp?requested/2:requested*2; return fail_get?-1:0; }
 #define setsockopt fake_setsockopt
 #define getsockopt fake_getsockopt
 static int configure(bool stream) {
@@ -51,11 +51,25 @@ int main(void) {
     int actual=configure(true);
     if(actual!=expected) { fprintf(stderr,"FAIL stream receive buffer %d, expected %d\n",actual,expected); return 1; }
     if(configure(false)!=0x19000) { fputs("FAIL bootstrap receive buffer changed\n",stderr); return 1; }
+    fail_set=1;
 #ifdef __ANDROID__
+    if(configure(true)!=expected) { fputs("FAIL optional Android stream-buffer failure became fatal\n",stderr); return 1; }
+#else
+    if(configure(true)!=CHIAKI_ERR_NETWORK) { fputs("FAIL desktop socket failure not propagated\n",stderr); return 1; }
+#endif
+    if(configure(false)!=CHIAKI_ERR_NETWORK) { fputs("FAIL bootstrap socket failure not propagated\n",stderr); return 1; }
+    fail_set=0;
+#ifdef __ANDROID__
+    warn_count=0; configure(true);
+    if(warn_count!=0) { fputs("FAIL accepted doubled buffer reported as clamped\n",stderr); return 1; }
     clamp=1; configure(true);
-    if(warn_count==0) { fputs("FAIL kernel clamp not warned\n",stderr); return 1; }
+    if(warn_count!=1) { fputs("FAIL kernel clamp not warned\n",stderr); return 1; }
     puts("PASS clamped stream buffer warned");
     clamp=0;
+    warn_count=0; fail_get=1;
+    if(configure(true)!=expected || warn_count!=1) { fputs("FAIL optional readback failure handling\n",stderr); return 1; }
+    fail_get=0;
+    puts("PASS optional Android buffer failures continue; bootstrap failures stay fatal");
 #endif
 #ifdef __ANDROID__
     puts("PASS Android streaming receive capacity; bootstrap unchanged");

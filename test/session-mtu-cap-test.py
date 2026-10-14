@@ -6,10 +6,10 @@ import subprocess
 import tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'lib/src/session.c').read_text()
-start=s.index('/* Cap the video stream packet size')
+start=s.index('\tif(session->mtu_in > 1280)')
 end=s.index('#endif', start)
 block=s[start:end]
-assert len(block) > 200 and 'Capping stream MTU' in block and 'mtu_in' in block, 'extracted MTU cap block is empty or narrowed'
+assert block.strip() and 'Capping stream MTU' in block and 'session->mtu_in = 1280;' in block, 'extracted MTU cap block is empty or narrowed'
 harness=r'''
 #include <stdint.h>
 #include <stddef.h>

@@ -64,7 +64,10 @@ class ControllerState {
 class Harness {
     val keyControllerState = ControllerState()
     val swapCrossMoon = false
-    private fun controllerStateUpdated() {}
+    val deliveredTriggers = mutableListOf<Pair<UByte, UByte>>()
+    private fun controllerStateUpdated() {
+        deliveredTriggers.add(keyControllerState.l2State to keyControllerState.r2State)
+    }
 '''+block+'''
 }
 fun main() {
@@ -83,11 +86,18 @@ fun main() {
     check(h.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_SELECT)))
     check(h.keyControllerState.buttons == 0u)
     println("PASS touchpad press composes with face buttons and releases cleanly")
+    h.deliveredTriggers.clear()
     check(h.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_L2)))
     check(h.keyControllerState.l2State == UByte.MAX_VALUE)
     check(h.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_L2)))
     check(h.keyControllerState.l2State == 0u.toUByte())
-    println("PASS analog trigger path unchanged")
+    check(h.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BUTTON_R2)))
+    check(h.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BUTTON_R2)))
+    check(h.deliveredTriggers == listOf(
+        UByte.MAX_VALUE to 0u.toUByte(), 0u.toUByte() to 0u.toUByte(),
+        0u.toUByte() to UByte.MAX_VALUE, 0u.toUByte() to 0u.toUByte()
+    )) { "Key-only trigger transitions must reach the session immediately" }
+    println("PASS key-only L2/R2 press and release dispatched without later motion")
     check(!h.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT)))
     println("PASS unmapped keys still return false")
 }

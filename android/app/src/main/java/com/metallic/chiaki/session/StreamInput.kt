@@ -138,10 +138,12 @@ class StreamInput(val context: Context, val preferences: Preferences)
 		{
 			KeyEvent.KEYCODE_BUTTON_L2 -> {
 				keyControllerState.l2State = if(event.action == KeyEvent.ACTION_DOWN) UByte.MAX_VALUE else 0U
+				controllerStateUpdated()
 				return true
 			}
 			KeyEvent.KEYCODE_BUTTON_R2 -> {
 				keyControllerState.r2State = if(event.action == KeyEvent.ACTION_DOWN) UByte.MAX_VALUE else 0U
+				controllerStateUpdated()
 				return true
 			}
 		}

@@ -8,10 +8,12 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 s = (root/'android/app/src/main/cpp/video-decoder.c').read_text()
 block = s[s.index('\tAMediaFormat *format = AMediaFormat_new();'):s.index('\tr = AMediaCodec_start(')]
+assert 'AMediaCodec_configure' in block and 'AMediaCodec_createDecoderByType' in block
 harness = r'''
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #define AMEDIAFORMAT_KEY_MIME "mime"
 #define AMEDIAFORMAT_KEY_WIDTH "width"
@@ -29,19 +31,20 @@ typedef int media_status_t;
 typedef struct { int low_latency; } AMediaFormat;
 typedef struct { int32_t target_width,target_height,target_codec,target_fps; void *log,*codec,*window; } AndroidChiakiVideoDecoder;
 static AMediaFormat fmt;
-static int calls, flags[4], reject_low_latency, reject_all;
+static int calls, flags[4], reject_low_latency, reject_all, deletes, creates, fail_create, reject_full;
 static bool chiaki_codec_is_h265(int codec) { return codec==1; }
 static AMediaFormat *AMediaFormat_new(void) { fmt.low_latency=0; return &fmt; }
 static void AMediaFormat_setString(AMediaFormat *f,const char *k,const char *v) { (void)f;(void)k;(void)v; }
 static void AMediaFormat_setFloat(AMediaFormat *f,const char *k,float v) { (void)f;(void)k;(void)v; }
 static void AMediaFormat_setInt32(AMediaFormat *f,const char *k,int v) { if(!strcmp(k,"low-latency")) f->low_latency=v; }
 static void AMediaFormat_delete(AMediaFormat *f) { (void)f; }
-static void AMediaCodec_delete(void *c) { (void)c; }
-static void *AMediaCodec_createDecoderByType(const char *mime) { (void)mime; return (void*)1; }
+static void AMediaCodec_delete(void *c) { if(c!=(void*)1) abort(); deletes++; }
+static void *AMediaCodec_createDecoderByType(const char *mime) { (void)mime; if(deletes!=creates+1) abort(); creates++; return fail_create?NULL:(void*)2; }
 static media_status_t AMediaCodec_configure(void *c,AMediaFormat *f,void *w,void *crypto,int opts) {
     (void)c;(void)w;(void)crypto;(void)opts;
+    if(c!=(calls==0?(void*)1:(void*)2)) abort();
     flags[calls++]=f->low_latency;
-    return (reject_all || (reject_low_latency && f->low_latency)) ? -1 : AMEDIA_OK;
+    return (reject_all || (reject_full && calls==1) || (reject_low_latency && f->low_latency)) ? -1 : AMEDIA_OK;
 }
 static int configure(int codec) {
     AndroidChiakiVideoDecoder d={.target_width=1920,.target_height=1080,.target_codec=codec,.codec=(void*)1};
@@ -62,6 +65,13 @@ int main(void) {
     puts("PASS unsupported HEVC low latency falls back");
     calls=0; reject_all=1; CHECK(configure(1)!=AMEDIA_OK); CHECK(calls==2);
     puts("PASS real configuration failure remains failure");
+    CHECK(deletes==2); CHECK(creates==2);
+    calls=0; reject_all=reject_low_latency=0; reject_full=1;
+    CHECK(configure(0)==AMEDIA_OK); CHECK(calls==2); CHECK(deletes==3); CHECK(creates==3);
+    puts("PASS AVC full-format rejection also recreates codec before minimal fallback");
+    calls=0; fail_create=1;
+    CHECK(configure(1)!=AMEDIA_OK); CHECK(calls==1); CHECK(deletes==4); CHECK(creates==4);
+    puts("PASS codec recreation failure propagates without configuring NULL");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='chiaki-lowlatency-',dir=os.environ.get('TMPDIR')) as tmp:

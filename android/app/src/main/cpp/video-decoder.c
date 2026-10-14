@@ -29,6 +29,7 @@ ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *dec
 {
 	decoder->log = log;
 	decoder->codec = NULL;
+	decoder->window = NULL;
 	decoder->timestamp_cur = 0;
 	decoder->target_width = target_width;
 	decoder->target_height = target_height;
@@ -45,7 +46,11 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 	AMediaCodec *codec = decoder->codec;
 	if(!codec)
 	{
+		ANativeWindow *window = decoder->window;
+		decoder->window = NULL;
 		chiaki_mutex_unlock(&decoder->codec_mutex);
+		if(window)
+			ANativeWindow_release(window);
 		return;
 	}
 	decoder->shutdown_output = true;
@@ -62,20 +67,23 @@ static void kill_decoder(AndroidChiakiVideoDecoder *decoder)
 	 * shutdown_output under it on its way out. */
 	chiaki_mutex_unlock(&decoder->codec_mutex);
 	chiaki_thread_join(&decoder->output_thread, NULL);
-	/* Delete under the mutex so no video_sample can be inside a codec
-	 * call on this AMediaCodec while it is being freed. */
+	/* Detach under the mutex after joining the output thread. Existing
+	 * input calls have finished and new ones cannot use the old codec. */
 	chiaki_mutex_lock(&decoder->codec_mutex);
 	if(decoder->codec == codec)
 		decoder->codec = NULL;
+	ANativeWindow *window = decoder->window;
+	decoder->window = NULL;
 	decoder->shutdown_output = false;
 	chiaki_mutex_unlock(&decoder->codec_mutex);
 	AMediaCodec_delete(codec);
+	if(window)
+		ANativeWindow_release(window);
 }
 
 void android_chiaki_video_decoder_fini(AndroidChiakiVideoDecoder *decoder)
 {
-	if(decoder->codec)
-		kill_decoder(decoder);
+	kill_decoder(decoder);
 	chiaki_mutex_fini(&decoder->codec_mutex);
 }
 
@@ -89,9 +97,9 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 		/* kill_decoder takes the mutex itself; holding it here would
 		 * deadlock on its internal lock. */
 		chiaki_mutex_unlock(&decoder->codec_mutex);
+		kill_decoder(decoder);
 		if(had_codec)
 		{
-			kill_decoder(decoder);
 			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
 		}
 		return;
@@ -357,9 +365,14 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 				CHIAKI_LOGI(decoder->log, "Video Decoder Output Thread detected shutdown after reported error");
 				break;
 			}
-			/* A persistent codec error would otherwise spin this core at
-			 * 100 % while the latency diagnostics silently go dark. */
-			if(status < 0 && !output_error_logged)
+			/* Format/buffer changes are notifications, not codec failures.
+			 * NDK buffer indices remain valid without Java-style array refresh. */
+			if(status == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED
+				|| status == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED)
+				continue;
+			/* Back off on no output or a persistent error; only unexpected
+			 * statuses warrant an error log. */
+			if(status != AMEDIACODEC_INFO_TRY_AGAIN_LATER && !output_error_logged)
 			{
 				CHIAKI_LOGE(decoder->log, "AMediaCodec_dequeueOutputBuffer() error: %d", (int)status);
 				output_error_logged = true;

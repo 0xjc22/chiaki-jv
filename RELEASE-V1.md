@@ -28,7 +28,7 @@ Video pipeline
 - Input dequeue retries up to three attempts so a transient buffer shortage does not cost a whole access unit (usually the keyframe recovery depends on).
 - Incomplete or FEC-failed frames are dropped before decoding instead of poisoning decoder reference pictures. Each FEC failure requests an IDR from the console: one request per recovery episode, at most one successful request per 500 ms, and the episode closes when a frame is delivered — so a persistently lossy link cannot cause a keyframe storm.
 - Frames arriving while no decoder exists are discarded silently-by-design instead of being reported corrupt, so a surface detach does not spam the console with per-frame corrupt reports.
-- The stream MTU advertised to the PS5 is capped at 1280. 1280 bytes plus 28 bytes of UDP/IP headers fits a 1420-MTU WireGuard tunnel with about 52 bytes of margin, so video packets never fragment. Before this change every video packet fragmented on the tunnel and cellular jitter damaged nearly every HEVC frame.
+- The stream MTU advertised to the PS5 is capped at 1280. With IPv4, 1280 bytes plus 28 bytes of UDP/IP headers fits the tested router's 1420-byte WireGuard interface MTU; that interface MTU already measures inner packets, so WireGuard encapsulation must not be subtracted again. This reduces fragmentation on the tested path, not every possible tunnel or smaller path MTU. Before this change the investigation observed fragmented video traffic and widespread cellular HEVC frame damage.
 - Android encrypted-stream receive buffer requests 4 MiB (the test phone accepted 8 MiB; Linux doubles the request for sk_rcvbuf accounting). A kernel clamp below the request now logs a warning instead of silently under-provisioning, a failed setsockopt falls back to the default buffer instead of aborting the connect, and the log line identifies which socket it describes.
 
 Decoder teardown
@@ -58,7 +58,7 @@ Android build and packaging
 
 - Cellular quality still depends on carrier loss and jitter; on a weak link, lower resolution/bitrate in the app.
 - The PS5 must be reachable at the manual-host IP through the VPN; discovery broadcasts do not cross tunnels.
-- The 4 MiB OS receive queue can hold roughly 1-2 s of video during a long consumer stall; safety relies on the receiver's damaged-frame drop plus IDR recovery, which drain stale frames rather than corrupting the stream.
+- The enlarged OS receive queue can accumulate playback latency during a long consumer stall. Linux's doubled buffer accounting is not usable video-payload capacity; queue duration depends on bitrate and packet overhead. The receiver rejects damaged frames but does not discard complete queued frames by age.
 - chiaki-ng's IDR recovery was the reference for IDRREQUEST handling; its connect-info enable toggle is not exposed in this fork yet.
 
 ## Tests
@@ -78,10 +78,23 @@ Host-runnable suites (all pass at v1.0.1; extraction-based harnesses compile the
 - android-layout-package-test.py (behavior-class resolution)
 - android-controller-timing-test.py (timing accounting incl. idle reset)
 - android-controller-unbuffered-test.py (attach/refocus re-request)
+- android-controller-select-touchpad-test.py (added in v1.1.0; SELECT down/up and composed buttons)
 - android-phone-stream-smoke.py (device-only; skips without adb)
 - verify-apk-artifact.py (APK signature/alignment/native tokens)
 
 Native suite: build-host ctest 1/1 (94/94 unit tests).
+
+## Unreleased follow-up review
+
+The published v1.1.0 artifact and identity above remain unchanged. The follow-up changes on `chiaki-jv` are not a new tagged release:
+- Release native-window references during decoder teardown and surface removal; correct the detach-before-delete comment.
+- Dispatch key-only L2/R2 transitions immediately, rather than waiting for another input event. SELECT remains mapped to the touchpad button.
+- Treat MediaCodec output-format/buffer notifications as informational; retain backoff for no-output and real errors.
+- Bound IDR recovery: retry on continued rejection after two seconds, rate-limit failed attempts to 500 ms, and include decoder callback rejection. Callback acceptance still closes the episode as an approximation, not confirmation of an IDR or displayed frame.
+- Verify APKs in place without overwriting release artifacts, with explicit identity/signature/ELF checks.
+- Strengthen regression coverage for window ownership/order, output notifications, failed socket-buffer setup, codec recreation, trigger delivery, and recovery retries.
+
+CTest covers the native unit suite only; the Python regression scripts are a separate gate. Offline build success does not establish bit-for-bit reproducibility or Android runtime/playback acceptance. See REVIEW-FOLLOWUP.md for the verification results and remaining limits.
 
 Build prerequisites: JDK17, SDK35/build-tools 35.0.0, CMake 3.22.1, NDK 29.0.14206865, plus a Python protobuf-3.20.3 toolchain for the old nanopb generator (see HEVC-INVESTIGATION.md and the test scripts).
 
