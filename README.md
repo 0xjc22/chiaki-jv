@@ -1,20 +1,24 @@
 
 ![Chiaki Logo](assets/chiaki_wide.png)
 
-# Chiaki-Up
+# chiaki-jv
 
 **Disclaimer:** This project is not endorsed or certified by Sony Interactive Entertainment LLC.
 
-Chiaki-up is a Free and Open Source Software Client for PlayStation 4 and PlayStation 5 Remote Play for Android.
-It is a fork of the original Chiaki, that was abandoned and since forked to Chiaki-ng.
-Chiaki-ng however, does not support Android. This is an effort to at least keep it up to date for the latest Android devices.
+chiaki-jv is a fork of [gameblabla/chiaki-up](https://github.com/gameblabla/chiaki-up), a free, open source PlayStation 4 and PlayStation 5 Remote Play client for Android.
 
-## chiaki-jv fork
+## Changes from Chiaki-Up
 
-This repository is the **chiaki-jv** fork of Chiaki-Up (base commit 86e38bf). Version 1 hardens HEVC streaming and remote play; see [RELEASE-V1.md](RELEASE-V1.md) for the full change list, measurements and build prerequisites. The release branch is `chiaki-jv`, tagged `v1.0.0` / `v1.0.1`. The Oboe submodule is pinned to the companion fork github.com/0xjc22/oboe (branch `chiaki-jv`, tag `chiaki-jv-n1`).
+- Fixes for HEVC stuttering and video corruption: submit complete frames to the decoder, reject damaged frames, and request a fresh keyframe for recovery. A smaller stream MTU also addresses fragmentation on the tested cellular VPN connection.
+- Lower controller input latency through unbuffered joystick dispatch, so stick input does not wait for Android's usual UI batching.
+- The controller SELECT button presses the PS5 touchpad instead of Share. Hold it to keep the touchpad button down; release it to let go.
+- Codec lifecycle and error-handling fixes, Android build cleanup, and regression tests for the streaming and input changes.
 
-Do not expect me to add major features, this is simply me maintaining it until Chiaki-ng decides to look at Android support...
-if that ever happens.
+The streaming fixes were tested with a PS5 on Wi-Fi and through a cellular WireGuard VPN. Results will vary with the phone, controller, and network. See [RELEASE-V1.md](RELEASE-V1.md) for measurements, build prerequisites, and the full change list.
+
+## Build and release notes
+
+The fork starts at upstream commit `86e38bf`. The release branch is `chiaki-jv`, tagged `v1.0.0` / `v1.0.1` / `v1.1.0` (current). The Oboe submodule is pinned to the companion fork github.com/0xjc22/oboe (branch `chiaki-jv`, tag `chiaki-jv-n1`).
 
 ## TODO
 
