@@ -1,0 +1,108 @@
+diff --git a/android/app/src/main/cpp/video-decoder.c b/android/app/src/main/cpp/video-decoder.c
+index 1146ad8..478061f 100644
+--- a/android/app/src/main/cpp/video-decoder.c
++++ b/android/app/src/main/cpp/video-decoder.c
+@@ -101,6 +101,16 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
+ 	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime);
+ 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, decoder->target_width);
+ 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, decoder->target_height);
++	/* Reserve room for bursty keyframes, not just average bitrate per frame.
++	 * The codec may ignore this hint; the input callback checks real capacity.
++	 */
++	int64_t max_input_size = (int64_t)decoder->target_width * decoder->target_height * 3 / 2;
++	if(max_input_size < 2 * 1024 * 1024)
++		max_input_size = 2 * 1024 * 1024;
++	if(max_input_size > INT32_MAX)
++		max_input_size = INT32_MAX;
++	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_MAX_INPUT_SIZE, (int32_t)max_input_size);
++	CHIAKI_LOGI(decoder->log, "Requesting video input buffer size %d bytes", (int)max_input_size);
+ 
+ 	media_status_t r = AMediaCodec_configure(decoder->codec, format, decoder->window, NULL, 0);
+ 	if(r != AMEDIA_OK)
+@@ -141,7 +151,7 @@ beach:
+ 
+ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, void *user)
+ {
+-	bool r = true;
++	bool success = false;
+ 	AndroidChiakiVideoDecoder *decoder = user;
+ 	chiaki_mutex_lock(&decoder->codec_mutex);
+ 
+@@ -151,38 +161,52 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, vo
+ 		goto beach;
+ 	}
+ 
+-	while(buf_size > 0)
++	if(buf_size == 0)
+ 	{
+-		ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, INPUT_BUFFER_TIMEOUT_MS * 1000);
+-		if(codec_buf_index < 0)
+-		{
+-			CHIAKI_LOGE(decoder->log, "Failed to get input buffer");
+-			r = false;
+-			goto beach;
+-		}
++		success = true;
++		goto beach;
++	}
+ 
+-		size_t codec_buf_size;
+-		uint8_t *codec_buf = AMediaCodec_getInputBuffer(decoder->codec, (size_t)codec_buf_index, &codec_buf_size);
+-		size_t codec_sample_size = buf_size;
+-		if(codec_sample_size > codec_buf_size)
+-		{
+-			//CHIAKI_LOGD(decoder->log, "Sample is bigger than buffer, splitting");
+-			codec_sample_size = codec_buf_size;
+-		}
+-		memcpy(codec_buf, buf, codec_sample_size);
+-		media_status_t r = AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index, 0, codec_sample_size, decoder->timestamp_cur++, 0); // timestamp just raised by 1 for maximum realtime
+-		if(r != AMEDIA_OK)
+-		{
+-			CHIAKI_LOGE(decoder->log, "AMediaCodec_queueInputBuffer() failed: %d", (int)r);
+-		}
+-		buf += codec_sample_size;
+-		buf_size -= codec_sample_size;
++	ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, INPUT_BUFFER_TIMEOUT_MS * 1000);
++	if(codec_buf_index < 0)
++	{
++		CHIAKI_LOGE(decoder->log, "Failed to get input buffer for sample of %zu bytes", buf_size);
++		goto beach;
++	}
+ 
++	size_t codec_buf_size = 0;
++	uint8_t *codec_buf = AMediaCodec_getInputBuffer(decoder->codec, (size_t)codec_buf_index, &codec_buf_size);
++	if(decoder->timestamp_cur == 0)
++		CHIAKI_LOGI(decoder->log, "Video decoder input capacity: %zu bytes", codec_buf_size);
++	if(!codec_buf || buf_size > codec_buf_size)
++	{
++		/* Never split an access unit into unmarked, arbitrary byte fragments.
++		 * Return the unused input buffer without submitting any frame bytes.
++		 * Returning false lets the receiver report the failed frame to the PS5.
++		 */
++		CHIAKI_LOGE(decoder->log, "Cannot submit complete video sample: size=%zu, capacity=%zu, buffer=%p",
++				buf_size, codec_buf_size, (void *)codec_buf);
++		media_status_t status = AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index,
++				0, 0, decoder->timestamp_cur, 0);
++		if(status != AMEDIA_OK)
++			CHIAKI_LOGE(decoder->log, "Failed to return unused input buffer: %d", (int)status);
++		goto beach;
+ 	}
+ 
++	memcpy(codec_buf, buf, buf_size);
++	/* One complete sample and one timestamp per submission. Output is rendered
++	 * immediately, so these timestamps identify samples rather than pace playback.
++	 */
++	media_status_t status = AMediaCodec_queueInputBuffer(decoder->codec, (size_t)codec_buf_index,
++			0, buf_size, decoder->timestamp_cur++, 0);
++	if(status != AMEDIA_OK)
++		CHIAKI_LOGE(decoder->log, "AMediaCodec_queueInputBuffer() failed: %d", (int)status);
++	else
++		success = true;
++
+ beach:
+ 	chiaki_mutex_unlock(&decoder->codec_mutex);
+-	return r;
++	return success;
+ }
+ 
+ static void *android_chiaki_video_decoder_output_thread_func(void *user)
