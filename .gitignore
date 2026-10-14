@@ -31,3 +31,4 @@ chiaki.conf
 .cache/
 *.keystore
 android/local.properties
+/.build-python/
