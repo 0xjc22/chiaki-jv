@@ -35,5 +35,5 @@ fun main() {
 '''
 with tempfile.TemporaryDirectory(prefix='chiaki-controller-',dir=os.environ.get('TMPDIR')) as d:
     p=Path(d); test=p/'InputTimingTest.kt'; test.write_text(code); jar=p/'test.jar'
-    subprocess.run(['/home/jc/.local/opt/jdk17/bin/java','-cp',os.pathsep.join(map(str,deps)),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib),'-d',str(jar),str(source),str(test)],check=True)
-    subprocess.run(['/home/jc/.local/opt/jdk17/bin/java','-cp',str(jar)+os.pathsep+str(stdlib),'InputTimingTestKt'],check=True)
+    subprocess.run([str(Path(os.environ.get('JAVA_HOME', Path.home()/'.local/opt/jdk17'))/'bin/java'),'-cp',os.pathsep.join(map(str,deps)),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib),'-d',str(jar),str(source),str(test)],check=True)
+    subprocess.run([str(Path(os.environ.get('JAVA_HOME', Path.home()/'.local/opt/jdk17'))/'bin/java'),'-cp',str(jar)+os.pathsep+str(stdlib),'InputTimingTestKt'],check=True)

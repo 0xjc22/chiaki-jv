@@ -70,7 +70,10 @@ extern "C" void android_chiaki_audio_output_settings(uint32_t channels, uint32_t
 	if(result == oboe::Result::OK)
 		CHIAKI_LOGI(ao->log, "Audio Output opened Oboe stream");
 	else
+	{
 		CHIAKI_LOGE(ao->log, "Audio Output failed to open Oboe stream: %s", oboe::convertToText(result));
+		return;
+	}
 
 	result = ao->stream->start();
 	if(result == oboe::Result::OK)

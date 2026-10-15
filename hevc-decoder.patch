@@ -1,5 +1,5 @@
 diff --git a/android/app/src/main/cpp/video-decoder.c b/android/app/src/main/cpp/video-decoder.c
-index 1146ad8..b8ad39b 100644
+index 1146ad8..36c3b8f 100644
 --- a/android/app/src/main/cpp/video-decoder.c
 +++ b/android/app/src/main/cpp/video-decoder.c
 @@ -9,8 +9,19 @@
@@ -113,7 +113,48 @@ index 1146ad8..b8ad39b 100644
  			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
  		}
  		return;
-@@ -101,9 +135,49 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
+@@ -75,17 +109,36 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
+ 	{
+ #if __ANDROID_API__ >= 23
+ 		CHIAKI_LOGI(decoder->log, "Video decoder already initialized, swapping surface");
+-		ANativeWindow *new_window = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
+-		AMediaCodec_setOutputSurface(decoder->codec, new_window);
+-		ANativeWindow_release(decoder->window);
++		ANativeWindow *new_window = ANativeWindow_fromSurface(env, surface);
++		if(!new_window)
++		{
++			CHIAKI_LOGE(decoder->log, "Failed to acquire replacement video surface");
++			goto beach;
++		}
++		media_status_t status = AMediaCodec_setOutputSurface(decoder->codec, new_window);
++		if(status != AMEDIA_OK)
++		{
++			CHIAKI_LOGE(decoder->log, "AMediaCodec_setOutputSurface() failed: %d", (int)status);
++			ANativeWindow_release(new_window);
++			goto beach;
++		}
++		ANativeWindow *old_window = decoder->window;
+ 		decoder->window = new_window;
++		if(old_window)
++			ANativeWindow_release(old_window);
+ #else
+ 		CHIAKI_LOGE(decoder->log, "Video Decoder already initialized");
+ #endif
+ 		goto beach;
+ 	}
+ 
+-	decoder->window = ANativeWindow_fromSurface(env, surface);
++	ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
++	if(!window)
++	{
++		CHIAKI_LOGE(decoder->log, "Failed to acquire initial video surface");
++		goto beach;
++	}
++	decoder->window = window;
+ 
+ 	const char *mime = chiaki_codec_is_h265(decoder->target_codec) ? "video/hevc" : "video/avc";
+ 	CHIAKI_LOGI(decoder->log, "Initializing decoder with mime %s", mime);
+@@ -101,9 +154,49 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
  	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime);
  	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, decoder->target_width);
  	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, decoder->target_height);
@@ -163,7 +204,7 @@ index 1146ad8..b8ad39b 100644
  	{
  		CHIAKI_LOGE(decoder->log, "AMediaCodec_configure() failed: %d", (int)r);
  		AMediaFormat_delete(format);
-@@ -117,6 +191,21 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
+@@ -117,6 +210,21 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
  		CHIAKI_LOGE(decoder->log, "AMediaCodec_start() failed: %d", (int)r);
  		goto error_codec;
  	}
@@ -185,7 +226,7 @@ index 1146ad8..b8ad39b 100644
  
  	ChiakiErrorCode err = chiaki_thread_create(&decoder->output_thread, android_chiaki_video_decoder_output_thread_func, decoder);
  	if(err != CHIAKI_ERR_SUCCESS)
-@@ -128,7 +217,8 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
+@@ -128,7 +236,8 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
  	goto beach;
  
  error_codec:
@@ -195,7 +236,7 @@ index 1146ad8..b8ad39b 100644
  	decoder->codec = NULL;
  
  error_surface:
-@@ -141,53 +231,87 @@ beach:
+@@ -141,53 +250,87 @@ beach:
  
  bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, void *user)
  {
@@ -310,7 +351,7 @@ index 1146ad8..b8ad39b 100644
  
  	while(1)
  	{
-@@ -195,7 +319,36 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
+@@ -195,7 +338,36 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
  		ssize_t status = AMediaCodec_dequeueOutputBuffer(decoder->codec, &info, -1);
  		if(status >= 0)
  		{
@@ -347,7 +388,7 @@ index 1146ad8..b8ad39b 100644
  			if(info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)
  			{
  				CHIAKI_LOGI(decoder->log, "AMediaCodec reported EOS");
-@@ -212,6 +365,19 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
+@@ -212,6 +384,19 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
  				CHIAKI_LOGI(decoder->log, "Video Decoder Output Thread detected shutdown after reported error");
  				break;
  			}

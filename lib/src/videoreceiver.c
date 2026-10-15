@@ -8,6 +8,7 @@
 #include <string.h>
 
 static ChiakiErrorCode chiaki_video_receiver_flush_frame(ChiakiVideoReceiver *video_receiver);
+static void chiaki_video_receiver_request_idr(ChiakiVideoReceiver *video_receiver);
 
 CHIAKI_EXPORT void chiaki_video_receiver_init(ChiakiVideoReceiver *video_receiver, struct chiaki_session_t *session, ChiakiPacketStats *packet_stats)
 {
@@ -67,22 +68,10 @@ CHIAKI_EXPORT void chiaki_video_receiver_av_packet(ChiakiVideoReceiver *video_re
 		return;
 	}
 
-	// check adaptive stream index
-	if(video_receiver->profile_cur < 0 || video_receiver->profile_cur != packet->adaptive_stream_index)
+	if(!packet->is_video || packet->adaptive_stream_index >= video_receiver->profiles_count)
 	{
-		if(packet->adaptive_stream_index >= video_receiver->profiles_count)
-		{
-			CHIAKI_LOGE(video_receiver->log, "Packet has invalid adaptive stream index %lu >= %lu",
-					(unsigned int)packet->adaptive_stream_index,
-					(unsigned int)video_receiver->profiles_count);
-			return;
-		}
-		video_receiver->profile_cur = packet->adaptive_stream_index;
-
-		ChiakiVideoProfile *profile = video_receiver->profiles + video_receiver->profile_cur;
-		CHIAKI_LOGI(video_receiver->log, "Switched to profile %d, resolution: %ux%u", video_receiver->profile_cur, profile->width, profile->height);
-		if(video_receiver->session->video_sample_cb)
-			video_receiver->session->video_sample_cb(profile->header, profile->header_sz, video_receiver->session->video_sample_cb_user);
+		CHIAKI_LOGE(video_receiver->log, "Packet has invalid video profile");
+		return;
 	}
 
 	// next frame?
@@ -105,10 +94,34 @@ CHIAKI_EXPORT void chiaki_video_receiver_av_packet(ChiakiVideoReceiver *video_re
 		}
 
 		video_receiver->frame_index_cur = frame_index;
-		chiaki_frame_processor_alloc_frame(&video_receiver->frame_processor, packet);
+		ChiakiErrorCode err = chiaki_frame_processor_alloc_frame(&video_receiver->frame_processor, packet);
+		if(err != CHIAKI_ERR_SUCCESS)
+		{
+			CHIAKI_LOGW(video_receiver->log, "Rejecting video frame %d: allocation/metadata error %d", (int)frame_index, (int)err);
+			video_receiver->frame_index_prev = frame_index;
+			chiaki_video_receiver_request_idr(video_receiver);
+			return;
+		}
 	}
 
-	chiaki_frame_processor_put_unit(&video_receiver->frame_processor, packet);
+	ChiakiErrorCode err = chiaki_frame_processor_put_unit(&video_receiver->frame_processor, packet);
+	if(err != CHIAKI_ERR_SUCCESS)
+	{
+		/* Duplicates and invalid units are ignored, not whole-frame damage:
+		 * a later valid unit or parity may still complete this generation. */
+		CHIAKI_LOGW(video_receiver->log, "Ignoring video unit: insertion error %d", (int)err);
+		return;
+	}
+
+	// Commit profile changes only after accepting a packet for its generation.
+	if(video_receiver->profile_cur != packet->adaptive_stream_index)
+	{
+		video_receiver->profile_cur = packet->adaptive_stream_index;
+		ChiakiVideoProfile *profile = video_receiver->profiles + video_receiver->profile_cur;
+		CHIAKI_LOGI(video_receiver->log, "Switched to profile %d, resolution: %ux%u", video_receiver->profile_cur, profile->width, profile->height);
+		if(video_receiver->session->video_sample_cb)
+			video_receiver->session->video_sample_cb(profile->header, profile->header_sz, video_receiver->session->video_sample_cb_user);
+	}
 
 	// if we are currently building up a frame
 	if(video_receiver->frame_index_cur != video_receiver->frame_index_prev)

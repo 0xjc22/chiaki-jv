@@ -18,7 +18,7 @@ The streaming fixes were tested with a PS5 on Wi-Fi and through a cellular WireG
 
 ## Build and release notes
 
-The fork starts at upstream commit `86e38bf`. The release branch is `chiaki-jv`, tagged `v1.0.0` / `v1.0.1` / `v1.1.0` / `v1.1.1` (current). The Oboe submodule is pinned to the companion fork github.com/0xjc22/oboe (branch `chiaki-jv`, tag `chiaki-jv-n1`).
+The fork starts at upstream commit `86e38bf`. The release branch is `chiaki-jv`, tagged `v1.0.0` / `v1.0.1` / `v1.1.0` / `v1.1.1` / `v1.1.2` (current). The Oboe submodule is pinned to the companion fork github.com/0xjc22/oboe (branch `chiaki-jv`, tag `chiaki-jv-n1`).
 
 ## TODO
 

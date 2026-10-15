@@ -1,10 +1,21 @@
-# chiaki-jv — Version 1 (v1.1.1)
+# chiaki-jv — Version 1 (v1.1.2)
 
 Fork of [gameblabla/chiaki-up](https://github.com/gameblabla/chiaki-up) at upstream commit 86e38bf, hardened for HEVC streaming and cellular remote play. Developed and verified on a Samsung Z Fold 8 streaming from a PS5 over LAN and over a WireGuard cellular VPN (FreshTomato 2026.3 router).
 
 Repository: https://github.com/0xjc22/chiaki-jv
 Release branch: chiaki-jv (default)
-Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (SELECT remap), v1.1.1 (current release)
+Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (SELECT remap), v1.1.1 (decoder/recovery hardening), v1.1.2 (current release)
+
+## v1.1.2 changes
+
+- Audio safety: balance decoder locking on input failure; validate codec setup, callbacks, input capacity and PCM output ranges/offsets; reject oversized compressed packets instead of splitting them; do not start an Oboe stream after opening fails. Teardown uses bounded dequeue waits and an atomic shutdown request rather than depending on EOS delivery; a failed input queue quarantines that codec until explicit replacement.
+- Frame assembly: validate slot bounds and per-frame metadata; propagate allocation/insertion failures; reject malformed padding, missing/short source units and empty access units; preserve real FEC repair and separately count late network receipts.
+- Loss accounting: synchronize sequence updates, use wrap-safe distances, suppress duplicates and allow bounded same-interval reordering. Reports finalize gaps on reset; packets arriving after that interval cannot retroactively repair it.
+- Surface switching: only replace the owned window after a successful codec switch, releasing rejected candidate references without changing the active decoder.
+- Add four host regression scripts, including real Jerasure/gf-complete frame-repair fixtures; make existing Kotlin host tests honor JAVA_HOME rather than the old machine's absolute path.
+- No controller mappings, profiles, rumble, touchpad features, bitrate adaptation, watchdog or reordering-buffer feature was added.
+
+See RELEASE-V1.1.2-VERIFICATION.md for current build/test/review evidence and remaining limits.
 
 ## v1.1.1 changes
 
@@ -21,12 +32,12 @@ Tags: v1.0.0 (first cut), v1.0.1 (review hardening), v1.1.0 (SELECT remap), v1.1
 
 ## Artifacts
 
-v1.1.1 debug APK (separate package, installs next to the upstream app and updates earlier HEVC builds):
-- Path: /home/jc/dl/chiaki-up-hevc-v1.1.1-arm64.apk
-- SHA256: 5810825b9a84f2ebefe6cfbf5e85503e3427acd0eb76e4cd65f7947b22fae6b1
+v1.1.2 debug APK (separate package, installs next to the upstream app and updates earlier HEVC builds; original debug signing certificate preserved):
+- Path: /home/darkin/herm/releases/chiaki-up-hevc-v1.1.2-arm64.apk
+- SHA256: 3ee90523e3c5c578842888abf8c2d62ba1382e88fc9510c3fceac24b30c06abc
 - Package: com.gameblabla.chiaki.hevcfix
-- versionCode 33, versionName 1.1.1-hevcfix
-- Label: Chiaki-Up HEVC 1.1.1
+- versionCode 34, versionName 1.1.2-hevcfix
+- Label: Chiaki-Up HEVC 1.1.2
 - arm64-v8a, minSdk 30, debug-signed, v2 signature, ZIP/ELF 16 KiB aligned
 
 ## What is fixed or added
@@ -72,7 +83,11 @@ Android build and packaging
 
 ## Tests
 
-Host regression scripts (16/16 pass at v1.1.1; extracted source blocks run against API fakes, not Android hardware):
+Host regression scripts (20/20 pass at v1.1.2; extracted-source/API-fake tests are not Android hardware acceptance):
+- android-audio-safety-test.py (26 cases, including real pthread shutdown checks)
+- frame-assembly-validation-test.py (real Jerasure/gf-complete repair, malformed data, allocation failure and receiver fixtures; also passed ASan/UBSan)
+- packet-stats-accounting-test.py (startup, duplicates, reorder, interval reset and wrap)
+- android-video-surface-switch-test.py (transactional switch and window ownership)
 - android-video-input-test.py (8/8 submission scenarios)
 - android-video-format-test.py (format sizing + low-latency keys)
 - android-video-low-latency-test.py (configure fallback semantics)
@@ -94,7 +109,7 @@ Host regression scripts (16/16 pass at v1.1.1; extracted source blocks run again
 
 Native suite: build-host ctest 1/1 (94/94 unit tests).
 
-The v1.1.1 offline Android build and APK signature/identity/alignment checks pass. CTest covers the native unit suite only; the Python regression scripts are a separate gate. No phone was connected for this release pass, so live playback acceptance is still unperformed. Build success does not establish bit-for-bit reproducibility.
+The v1.1.2 offline Android build and APK signature/identity/alignment checks pass, with the same signing certificate as v1.1.1. CTest covers the native unit suite only; the Python regression scripts are a separate gate. No phone acceptance was performed for this release, so live playback acceptance is still unperformed. Build success does not establish bit-for-bit reproducibility.
 
 Build prerequisites: JDK17, SDK35/build-tools 35.0.0, CMake 3.22.1, NDK 29.0.14206865, plus a Python protobuf-3.20.3 toolchain for the old nanopb generator (see HEVC-INVESTIGATION.md and the test scripts).
 

@@ -18,10 +18,19 @@ typedef struct chiaki_packet_stats_t
 	uint64_t gen_received;
 	uint64_t gen_lost;
 
-	// For sequential packets, i.e. where packets are identified by a sequence number
-	ChiakiSeqNum16 seq_min; // sequence number that was max at the last reset
-	ChiakiSeqNum16 seq_max; // currently maximal sequence number
-	uint64_t seq_received; // total received packets since the last reset
+	/* Sequence accounting: first observation establishes the stream baseline
+	 * and counts as one received/expected packet (no assumed startup loss).
+	 * Forward distances must be < 32768; exactly half-range is ambiguous
+	 * and ignored. Unique reordered packets repair only the current interval
+	 * and only within 256 sequence positions of the high-water mark.
+	 * Reset/get(reset=true) finalizes all gaps through seq_max: late packets
+	 * from that interval cannot change later reports. get(false) is a snapshot.
+	 * History and per-push work are bounded, even over multiple wraps. */
+	ChiakiSeqNum16 seq_max;
+	bool seq_initialized;
+	uint64_t seq_expected;
+	uint64_t seq_received;
+	uint8_t seq_seen[256];
 } ChiakiPacketStats;
 
 CHIAKI_EXPORT ChiakiErrorCode chiaki_packet_stats_init(ChiakiPacketStats *stats);

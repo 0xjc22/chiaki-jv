@@ -109,17 +109,36 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	{
 #if __ANDROID_API__ >= 23
 		CHIAKI_LOGI(decoder->log, "Video decoder already initialized, swapping surface");
-		ANativeWindow *new_window = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
-		AMediaCodec_setOutputSurface(decoder->codec, new_window);
-		ANativeWindow_release(decoder->window);
+		ANativeWindow *new_window = ANativeWindow_fromSurface(env, surface);
+		if(!new_window)
+		{
+			CHIAKI_LOGE(decoder->log, "Failed to acquire replacement video surface");
+			goto beach;
+		}
+		media_status_t status = AMediaCodec_setOutputSurface(decoder->codec, new_window);
+		if(status != AMEDIA_OK)
+		{
+			CHIAKI_LOGE(decoder->log, "AMediaCodec_setOutputSurface() failed: %d", (int)status);
+			ANativeWindow_release(new_window);
+			goto beach;
+		}
+		ANativeWindow *old_window = decoder->window;
 		decoder->window = new_window;
+		if(old_window)
+			ANativeWindow_release(old_window);
 #else
 		CHIAKI_LOGE(decoder->log, "Video Decoder already initialized");
 #endif
 		goto beach;
 	}
 
-	decoder->window = ANativeWindow_fromSurface(env, surface);
+	ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
+	if(!window)
+	{
+		CHIAKI_LOGE(decoder->log, "Failed to acquire initial video surface");
+		goto beach;
+	}
+	decoder->window = window;
 
 	const char *mime = chiaki_codec_is_h265(decoder->target_codec) ? "video/hevc" : "video/avc";
 	CHIAKI_LOGI(decoder->log, "Initializing decoder with mime %s", mime);
